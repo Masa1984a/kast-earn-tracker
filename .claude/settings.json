@@ -1,0 +1,22 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -f plan.md ] && grep -q 'In Progress' plan.md; then echo '⚠️  plan.md に In Progress のタスクがあります。完了していれば Done に更新してください。'; fi"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -f plan.md ]; then DONE=$(grep -c '`Done`' plan.md); TOTAL=$(grep -cE '\\- \\[' plan.md); echo \"📊 進行: $DONE / $TOTAL tasks done\"; fi"
+          }
+        ]
+      }
+    ]
+  }
+}
