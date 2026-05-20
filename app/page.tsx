@@ -272,20 +272,20 @@ export default function Home() {
         )}
 
         {series && series.length > 0 && (
-          <div className="mt-6 h-[480px] rounded-md border border-[#D8DEE9] bg-[#ECEFF4] p-4 shadow-sm sm:h-[520px] dark:border-[#434C5E] dark:bg-[#3B4252]">
+          <div className="mt-6 h-[480px] rounded-md border border-[#2E3440] bg-[#ECEFF4] p-4 shadow-sm sm:h-[520px] dark:border-[#ECEFF4] dark:bg-[#3B4252]">
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={series} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
                 <CartesianGrid stroke={NORD.snow0} strokeOpacity={0.6} vertical={false} />
                 <XAxis
                   dataKey="date"
-                  tick={{ fontSize: 11, fill: NORD.polar3 }}
-                  stroke={NORD.polar3}
+                  tick={{ fontSize: 11, fill: 'var(--foreground)' }}
+                  stroke="var(--foreground)"
                   interval="preserveStartEnd"
                 />
                 <YAxis
                   yAxisId="left"
-                  tick={{ fontSize: 11, fill: NORD.polar3 }}
-                  stroke={NORD.polar3}
+                  tick={{ fontSize: 11, fill: 'var(--foreground)' }}
+                  stroke="var(--foreground)"
                   tickFormatter={(v: number) =>
                     v >= 1_000_000
                       ? `$${(v / 1_000_000).toFixed(1)}M`
@@ -295,8 +295,8 @@ export default function Home() {
                 <YAxis
                   yAxisId="right"
                   orientation="right"
-                  tick={{ fontSize: 11, fill: NORD.polar3 }}
-                  stroke={NORD.polar3}
+                  tick={{ fontSize: 11, fill: 'var(--foreground)' }}
+                  stroke="var(--foreground)"
                   tickFormatter={(v: number) =>
                     v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v)
                   }
@@ -304,7 +304,7 @@ export default function Home() {
                     value: 'Holders',
                     angle: 90,
                     position: 'insideRight',
-                    fill: NORD.polar3,
+                    fill: 'var(--foreground)',
                     fontSize: 11,
                     offset: -2,
                   }}
@@ -321,7 +321,7 @@ export default function Home() {
                   cursor={{ fill: NORD.snow0, opacity: 0.5 }}
                   formatter={(v, name) => formatTooltip(v as number, String(name))}
                 />
-                <Legend wrapperStyle={{ color: NORD.polar3, fontSize: 12 }} />
+                <Legend wrapperStyle={{ color: 'var(--foreground)', fontSize: 12 }} />
                 {service === 'all' ? (
                   <>
                     <Bar
