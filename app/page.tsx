@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import {
   Bar,
   CartesianGrid,
@@ -12,6 +13,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+
+const KAST_CTA_URL = 'https://go.kast.xyz/VqVO/SAPPORO';
 
 const SIZE_BUCKETS = [
   'dust_lt_100',
@@ -541,22 +544,29 @@ export default function Home() {
           />
         </div>
 
-        <section className="mt-8 rounded-md border border-[#D8DEE9] bg-[#ECEFF4] p-6 text-center shadow-sm dark:border-[#434C5E] dark:bg-[#3B4252]">
+        <section className="mt-8 rounded-md border border-[#D8DEE9] bg-[#ECEFF4] p-6 shadow-sm dark:border-[#434C5E] dark:bg-[#3B4252]">
           <h2 className="text-xl font-bold sm:text-2xl">Join the KAST Community</h2>
-          <p className="mt-2 text-sm text-[#4C566A] dark:text-[#D8DEE9]">
-            New to KAST? Get started in 2 minutes:
-          </p>
-          <a
-            href="https://go.kast.xyz/VqVO/SAPPORO"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-4 inline-block rounded-md bg-[#5E81AC] px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#4C6991]"
-          >
-            Get started with KAST →
-          </a>
-          <p className="mt-4 text-xs text-[#4C566A] dark:text-[#D8DEE9]">
-            Store, earn, move, and spend stablecoins globally.
-          </p>
+          <div className="mt-4 flex flex-col items-start gap-4 sm:flex-row sm:items-center">
+            <div className="rounded bg-white p-2 shadow-sm">
+              <QRCodeSVG value={KAST_CTA_URL} size={120} level="M" />
+            </div>
+            <div className="space-y-2 text-sm">
+              <p className="text-[#4C566A] dark:text-[#D8DEE9]">
+                New to KAST? Get started in 2 minutes:
+              </p>
+              <a
+                href={KAST_CTA_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block break-all font-mono text-[#5E81AC] hover:underline dark:text-[#88C0D0]"
+              >
+                {KAST_CTA_URL}
+              </a>
+              <p className="text-xs text-[#4C566A] dark:text-[#D8DEE9]">
+                Store, earn, move, and spend stablecoins globally.
+              </p>
+            </div>
+          </div>
         </section>
       </div>
     </main>
