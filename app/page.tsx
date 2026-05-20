@@ -514,24 +514,12 @@ export default function Home() {
             accentBg="bg-[#5E81AC]"
             explorer="solana"
             data={usdkyHolders}
-            extraColumns={(row) => (
-              <td className="px-2 py-1 text-right font-mono text-[#4C566A] dark:text-[#D8DEE9]">
-                {row.multiplier.toFixed(6)}
-              </td>
-            )}
-            extraHeader={<th className="px-2 py-1 text-right font-medium">Multiplier</th>}
           />
           <HoldersTable
             title="Gauntlet Alpha"
             accentBg="bg-[#B48EAD]"
             explorer="base"
             data={gauntletHolders}
-            extraColumns={(row) => (
-              <td className="px-2 py-1 text-right font-mono text-[#4C566A] dark:text-[#D8DEE9]">
-                {row.shares.toFixed(4)}
-              </td>
-            )}
-            extraHeader={<th className="px-2 py-1 text-right font-medium">Shares</th>}
           />
         </div>
       </div>
@@ -555,15 +543,11 @@ function HoldersTable<T extends { wallet: string; usd_value: number }>({
   accentBg,
   explorer,
   data,
-  extraHeader,
-  extraColumns,
 }: {
   title: string;
   accentBg: string;
   explorer: 'solana' | 'base';
   data: HoldersResponse<T> | null;
-  extraHeader?: React.ReactNode;
-  extraColumns?: (row: T) => React.ReactNode;
 }) {
   return (
     <div className="overflow-hidden rounded-md border border-[#D8DEE9] bg-[#ECEFF4] shadow-sm dark:border-[#434C5E] dark:bg-[#3B4252]">
@@ -586,14 +570,13 @@ function HoldersTable<T extends { wallet: string; usd_value: number }>({
               <th className="px-2 py-1.5 text-left font-medium">#</th>
               <th className="px-2 py-1.5 text-left font-medium">Wallet</th>
               <th className="px-2 py-1.5 text-right font-medium">USD</th>
-              {extraHeader}
             </tr>
           </thead>
           <tbody>
             {data && data.holders.length === 0 && (
               <tr>
                 <td
-                  colSpan={extraHeader ? 4 : 3}
+                  colSpan={3}
                   className="px-2 py-3 text-center text-[#4C566A] dark:text-[#D8DEE9]"
                 >
                   No holders in range
@@ -619,7 +602,6 @@ function HoldersTable<T extends { wallet: string; usd_value: number }>({
                 <td className="px-2 py-1 text-right font-mono">
                   ${Math.round(h.usd_value).toLocaleString()}
                 </td>
-                {extraColumns?.(h)}
               </tr>
             ))}
           </tbody>
