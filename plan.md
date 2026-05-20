@@ -1,7 +1,7 @@
 # USDKY Tracker - Implementation Plan
 
-最終更新: 2026-05-19
-進行状況: 41 / 47 tasks done
+最終更新: 2026-05-20
+進行状況: 44 / 47 tasks done (Phase 1-8) + Phase 9 進行中（22 / 36 done — 9.0-9.8 ほぼ完走、smoke test PASS）
 
 ---
 
@@ -68,7 +68,7 @@
 - [x] **5.3** multiplier 取得 + 全 token account 取得処理 — `Done` (`getMultiplier()` + `getAllTokenAccounts()`)
 - [x] **5.4** owner 集約 + `unnest` を使った一括 upsert — `Done` (Map で owner 別 principal + ataCount 集約 → `usdky_snapshots` upsert / `usdky_multipliers` upsert)
 - [x] **5.5** `vercel.json` で日次cron スケジュール設定（`5 0 * * *`） — `Done`
-- [ ] **5.6** デプロイ + 手動 curl で疎通確認 — `Pending` (Vercel デプロイ後に実施)
+- [x] **5.6** デプロイ + 手動 curl で疎通確認 — `Done` (GitHub `Masa1984a/kast-earn-tracker` 経由で Vercel デプロイ。https://kast-earn-tracker.vercel.app/ で `/`, `/api/summary`, `/api/snapshots`, `/api/cron/usdky-snapshot` (Bearer auth) 全部 200 OK。cron が live tokenAccounts から 5 dust wallet を追加発見し 1094 → 1099 holders に更新)
 
 ---
 
@@ -98,8 +98,8 @@
 
 - [x] **8.1** Neon上で `usdky_snapshots` のレコード総数と日付範囲を確認 — `Done` (42,649 rows / 316 days [2025-07-08 .. 2026-05-19] / 1,097 owners / 最新日 1,094 holders / $1,870,612)
 - [x] **8.2** Cron を手動で `curl` 叩いて当日分が入ることを確認 — `Done` (localhost で Bearer auth + 200 OK + `{holders:1094, total_usd:1870612, multiplier:1.031907}` を確認)
-- [ ] **8.3** フロントエンドで積み上げグラフが期待通り描画されることを確認 — `Pending` (localhost:3000 で HTML レンダリング確認済。ユーザーがブラウザで視認確認)
-- [ ] **8.4** 自分のウォレット `4QvVC4Cc3UWvFk97VwWWV7AvNg6L7XGXu9GFBKgHPMDD` の `usd_value` が KAST アプリ表示とほぼ一致することを確認 — `Pending` (DB 上 2026-05-19: $8,021.13 / 2026-05-18: $1,770.00。KAST アプリと比較待ち)
+- [x] **8.3** フロントエンドで積み上げグラフが期待通り描画されることを確認 — `Done` (localhost:3000 でユーザーが視認確認 (evidence_01.png)。本番 https://kast-earn-tracker.vercel.app/ も HTML レンダリング確認済)
+- [x] **8.4** 自分のウォレット `4QvVC4Cc3UWvFk97VwWWV7AvNg6L7XGXu9GFBKgHPMDD` の `usd_value` が KAST アプリ表示とほぼ一致することを確認 — `Done` (DB 上 2026-05-19: $8,021.13、ユーザー確認済「残高は認識あっています」)
 - [ ] **8.5** Vercel Cron が翌日自動実行されることを Vercel ダッシュボードで確認 — `Pending` (Vercel デプロイ後の翌日確認)
 
 ---
@@ -143,3 +143,92 @@
 - Phase 4 バックフィルが credit 消費のピーク
 - 想定: USDKY Mint への署名 3,000〜5,000件と仮定して、合計 10,000 credit 前後
 - Helius 無料枠 100K credit/月 内に収まる想定だが、Phase 4.3 で実数確認すること
+
+---
+
+## Phase 9: Gauntlet Alpha Vault 統合（非同期ジョブ + share_price 対応版）
+
+> 仕様: `gauntlet-extension.md`（2026-05-20 更新版 — share_price 対応）
+> Token: `0x000000000001CdB57E58Fa75Fe420a0f4D6640D5` (Base / Aera MultiDepositorVault, gtUSDa)
+> Dune Queries: snapshot=`7534621`, share_price=`7543001`
+
+### 9.0 進行管理
+- [x] **9.0** plan.md に Phase 9 を追記 — `Done` (2026-05-20、share_price 対応版に追従済)
+
+### 9.1 事前検証 — **完了済**（2026-05-20）
+- [x] **9.1.1** `gtusda_balance` 単位 = **shares** と確定 — `Done` (Dune `0x371002...` 2026-05-20 値 0.9462 vs KAST アプリ表示 $1.01 → 比率 ≈ 1.067 で shares 確定)
+- [x] **9.1.2** Basescan コントラクト種別確認 — `Done` (Aera Finance **MultiDepositorVault** / 原資産 USDC / `sharePrice`/`totalAssets` 等 read 関数なし → on-chain NAV 取得不可)
+- [x] **9.1.3** Vault ローンチ日 = バックフィル `start_date` 確定 — `Done` (Dune snapshot 範囲 **2025-06-05** .. 2026-05-20 / 350日 / latest 6,052 holders / sum shares 62.6M)
+- [x] **9.1.4** share_price 取得方針確定 = **Option C** (Dune `Enter` event decode による日次 share_price クエリ) — `Done` (新規 Dune query `7543001` をユーザー作成済。年率 ≈ 7.0% 上昇)
+
+### 9.2 スキーマ追加
+- [x] **9.2.1** `migrations/004_dune_jobs_and_gauntlet.sql` 作成（`dune_jobs` + `idx_dune_jobs_active` 部分インデックス + `idx_dune_jobs_kind_date`）— `Done` (`migrations/004_dune_jobs_and_gauntlet.sql`)
+- [x] **9.2.2** 同 migration に `gauntlet_snapshots` テーブル + 2 インデックスを追加 — `Done`
+- [x] **9.2.3** 同 migration に `gauntlet_share_prices` テーブル追加 — `Done`
+- [x] **9.2.4** `scripts/apply-migration.ts` で Neon に適用 — `Done` (7 statements 適用 / 3 テーブル + 2 インデックス確認)
+
+### 9.3 Dune APIクライアント
+- [x] **9.3.1** `lib/dune.ts` を新規作成 — `Done` (`lib/dune.ts`)
+- [x] **9.3.2** `executeQuery` / `getExecutionStatus` / `getExecutionResults` 実装（+ `DuneExecutionState` 型）— `Done`
+- [x] **9.3.3** Query ID 定数 `GAUNTLET_SNAPSHOTS_QUERY_ID=7534621` / `GAUNTLET_PRICE_QUERY_ID=7543001` 定義 — `Done`
+- [ ] **9.3.4** `DUNE_API_KEY` を `.env.local`（投入済）+ Vercel ダッシュボードに反映 — `Pending` (local OK / Vercel 未 — 9.11 デプロイ前に確認)
+
+### 9.4 ジョブ取り込みロジック
+- [x] **9.4.1** `lib/ingest.ts` を新規作成 — `Done` (`lib/ingest.ts`)
+- [x] **9.4.2** `ingestJobResults(sql, jobKind, rows)` ディスパッチャ実装（4種類の job_kind 対応）— `Done` (gauntlet_daily / gauntlet_backfill / gauntlet_price / gauntlet_price_backfill)
+- [x] **9.4.3** `ingestGauntletSnapshots` 実装（price テーブル先読み + `usd_value = shares × price`、price 未取得日は 1.0 で graceful degrade）— `Done` (500 件バッチ + `unnest` upsert)
+- [x] **9.4.4** `ingestGauntletPrices` 実装（`gauntlet_share_prices` upsert）— `Done`
+- [x] **9.4.5** auto-recompute 実装（price ingest 後に対象日の `gauntlet_snapshots.usd_value` を `UPDATE ... FROM gauntlet_share_prices`）— `Done` (`IS DISTINCT FROM` で no-op UPDATE 除外)
+
+### 9.5 Cron A: dune-kickoff（snapshot + price を並列起票）
+- [x] **9.5.1** `app/api/cron/dune-kickoff/route.ts` 作成（`maxDuration=30` + Bearer auth）— `Done`
+- [x] **9.5.2** snapshot job（`job_kind='gauntlet_daily'`）kickoff 実装 — `Done` (`Promise.all` で並列)
+- [x] **9.5.3** price job（`job_kind='gauntlet_price'`）kickoff 実装 — `Done`
+- [x] **9.5.4** job_kind 別の当日重複防止チェック実装 — `Done` (`kickoffJob` 内で `created_at::date = current_date` の `executing/completed` を skip)
+- [x] **9.5.5** 手動 curl 疎通確認（`dune_jobs` に 2 行 executing で入ること）— `Done` (admin backfill 経由で job_id=1,2 が `executing` で入り `completed` 遷移確認)
+
+### 9.6 Cron B: dune-poll
+- [x] **9.6.1** `app/api/cron/dune-poll/route.ts` 作成（`maxDuration=60` + Bearer auth）— `Done` (`LIMIT 5` FIFO)
+- [x] **9.6.2** Stale 掃除（`started_at < now() - interval '1 hour'` を failed に）— `Done`
+- [x] **9.6.3** snapshot job ステータス遷移確認（executing → completed）— `Done` (job_id=1 `executing` → `completed` / 48,062 rows)
+- [x] **9.6.4** price job ステータス遷移確認 — `Done` (job_id=2 `executing` → `completed` / 8 rows)
+- [x] **9.6.5** auto-recompute が走り `gauntlet_snapshots.usd_value` が更新されることを確認 — `Done` (probe wallet 0.9462 × 1.0665 = $1.0091 で KAST 表示 $1.01 と一致)
+
+### 9.7 バックフィル admin endpoint
+- [x] **9.7.1** `app/api/admin/trigger-gauntlet-backfill/route.ts` 作成（Bearer auth）— `Done`
+- [x] **9.7.2** `kinds`（=['snapshots','price'] デフォルト）パラメータで個別 / 一括起動を実装 — `Done` (`'snapshots' | 'price'` で type-narrow)
+- [x] **9.7.3** ローカルから 2025-06-05 .. 2026-05-20 で snapshot + price 一括バックフィル発動 — `Done` (job_id=3 snapshot **658,179 rows** / job_id=4 price **350 rows** / 全期間カバー)
+- [x] **9.7.4** `dune_jobs` / `gauntlet_snapshots` / `gauntlet_share_prices` 3テーブル全てに値が入ることを確認 — `Done` (smoke test で全 3 テーブルに値あり)
+
+### 9.8 vercel.json 更新
+- [x] **9.8.1** `dune-kickoff` (`20 0 * * *`) と `dune-poll` (`*/10 * * * *`) を追加 — `Done` (`vercel.json`)
+
+### 9.9 API エンドポイント拡張
+- [x] **9.9.1** `/api/snapshots` に `service` パラメータ追加（`usdky` / `gauntlet` / 未指定=両方）— `Done`
+- [x] **9.9.2** 未指定時はサービス別合計（UNION ALL）レスポンス — `Done` (`{date, usdky, gauntlet}` の Recharts 互換)
+- [x] **9.9.3** `has_sol` フィルタを `service=usdky` のみで有効化 — `Done` (exclude は usdky 側にのみ NOT EXISTS で適用、gauntlet 側は素通し)
+- [x] **9.9.4** `/api/share-prices?service=gauntlet` 追加（annualized yield 計算用の生 share_price 履歴）— `Done` (`/api/share-prices`)
+- [x] **9.9.5** `/api/summary` を `{usdky:..., gauntlet:...}` に拡張（破壊的変更、9.10 と同期）— `Done`
+
+### 9.10 フロントエンド改修
+- [x] **9.10.1** サービスフィルタ UI 追加（All / USDKY / Gauntlet Alpha）— `Done` (`app/page.tsx` セグメントスタイルのトグル)
+- [x] **9.10.2** ヘッダ統計をサービス別カードに分割 — `Done` (`ServiceCard` コンポーネント、accent カラー付き)
+- [x] **9.10.3** Gauntlet ヘッダに `share_price` + annualized yield（過去30日 share_price 推移から計算）表示 — `Done` (`computeAnnualizedYield`)
+- [x] **9.10.4** 「Has SOL」トグルを USDKY ブロック内に移動 + Gauntlet 選択時は非表示 — `Done` (`service !== 'gauntlet'` で条件描画)
+- [x] **9.10.5** 積み上げグラフ `stackId` を `All`=service / 個別=volume bucket に切替 — `Done`
+- [ ] **9.10.6** モバイル縦並びレイアウト確認 — `Pending` (CSS は `grid-cols-1 md:grid-cols-2` で対応済、ブラウザ視認は 9.11.6 にて)
+
+### 9.11 動作確認 + 本番デプロイ
+- [x] **9.11.1** Gauntlet バックフィル後の 3 テーブルレコード件数・日付範囲確認 — `Done` (dune_jobs 4 jobs / gauntlet_snapshots 658,179 rows / gauntlet_share_prices 350 rows / 2025-06-05 .. 2026-05-20)
+- [ ] **9.11.2** dune-kickoff cron 翌日自動実行 → poll cron が 10 分以内に両 jobs 取り込み確認 — `Pending`
+- [x] **9.11.3** Base wallet `0x371002...02cae` の最新 `usd_value` が KAST アプリ表示 **$1.01** と一致 — `Done` (smoke test 結果 $1.0091 で完全一致)
+- [ ] **9.11.4** Stale 掃除動作確認（わざと 1h 以上 executing 放置）— `Pending`
+- [ ] **9.11.5** price のみ再バックフィル → `usd_value` auto-recompute を確認 — `Pending`
+- [ ] **9.11.6** Production deploy + 全機能動作確認 — `Pending`
+
+### Phase 9 Blockers / Notes
+- 9.1 関所完了済（2026-05-20）→ 9.2 以降に着手可
+- 9.3.4: `DUNE_API_KEY` は `.env.local` 投入済。本番デプロイ前に Vercel ダッシュボードへの追加が必要
+- Aera MultiDepositorVault は ERC-4626 非互換 + read NAV 関数なし → share_price は Dune query 7543001（Enter event decode）に依存
+- 入力 token は USDC 前提。他 stablecoin 受け入れが始まると `enter_events_today` が急減するので要監視
+- `dune_jobs` は将来 `external_jobs` に rename 余地があるが、早期抽象化は避ける（仕様書 §7）

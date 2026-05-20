@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Bar,
   BarChart,
@@ -36,23 +36,60 @@ const BUCKET_LABEL: Record<SizeBucket, string> = {
   dust_lt_100: 'Dust (<$100)',
 };
 
-// All known non-KAST-custodial labels — collapsed into a single "Has SOL" toggle
-// because the unifying property is "the wallet has SOL = it's not a KAST custodial user".
+const SERVICE_COLOR = {
+  usdky: '#2563eb',
+  gauntlet: '#7c3aed',
+} as const;
+
 const NON_CUSTODIAL_LABELS = 'treasury,infra,has_sol';
 
-interface Summary {
+type Service = 'all' | 'usdky' | 'gauntlet';
+
+interface UsdkySummary {
   snapshot_date: string | null;
   holders: number;
   total_usd: number;
   multiplier: number;
 }
-type SeriesPoint = { date: string } & Partial<Record<SizeBucket, number>>;
+interface GauntletSummary {
+  snapshot_date: string | null;
+  holders: number;
+  total_usd: number;
+  share_price: number;
+}
+interface SummaryResponse {
+  usdky: UsdkySummary;
+  gauntlet: GauntletSummary;
+}
+
+type SizePoint = { date: string } & Partial<Record<SizeBucket, number>>;
+type ServicePoint = { date: string; usdky: number; gauntlet: number };
+type SeriesPoint = SizePoint | ServicePoint;
+
+interface SharePricePoint {
+  date: string;
+  share_price: number;
+  enter_events_today: number;
+  daily_volume_usdc: number;
+}
+
+function computeAnnualizedYield(points: SharePricePoint[], days = 30): number | null {
+  if (points.length < 2) return null;
+  const recent = points.slice(-days);
+  if (recent.length < 2) return null;
+  const startPrice = recent[0].share_price;
+  const endPrice = recent[recent.length - 1].share_price;
+  if (startPrice <= 0) return null;
+  const period = recent.length - 1;
+  return Math.pow(endPrice / startPrice, 365 / period) - 1;
+}
 
 export default function Home() {
-  // Default OFF = exclude non-custodial wallets, showing pure KAST users only.
+  const [service, setService] = useState<Service>('all');
   const [showHasSol, setShowHasSol] = useState<boolean>(false);
-  const [summary, setSummary] = useState<Summary | null>(null);
+  const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [series, setSeries] = useState<SeriesPoint[] | null>(null);
+  const [sharePrices, setSharePrices] = useState<SharePricePoint[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -61,67 +98,116 @@ export default function Home() {
   useEffect(() => {
     setLoading(true);
     setErr(null);
-    const qs = excludeParam ? `?exclude=${excludeParam}` : '';
+
+    const summaryQs = excludeParam ? `?exclude=${excludeParam}` : '';
+    const snapshotsQs = new URLSearchParams({ bucket: 'size' });
+    if (service !== 'all') snapshotsQs.set('service', service);
+    if (excludeParam) snapshotsQs.set('exclude', excludeParam);
+
     Promise.all([
-      fetch(`/api/summary${qs}`).then((r) => r.json()),
-      fetch(`/api/snapshots${excludeParam ? `?bucket=size&exclude=${excludeParam}` : '?bucket=size'}`).then(
-        (r) => r.json(),
-      ),
+      fetch(`/api/summary${summaryQs}`).then((r) => r.json()),
+      fetch(`/api/snapshots?${snapshotsQs.toString()}`).then((r) => r.json()),
+      fetch('/api/share-prices?service=gauntlet').then((r) => r.json()),
     ])
-      .then(([s, p]) => {
-        setSummary(s as Summary);
+      .then(([s, p, sp]) => {
+        setSummary(s as SummaryResponse);
         setSeries(p as SeriesPoint[]);
+        setSharePrices(sp as SharePricePoint[]);
       })
       .catch((e: Error) => setErr(e.message))
       .finally(() => setLoading(false));
-  }, [excludeParam]);
+  }, [excludeParam, service]);
+
+  const annualizedYield = useMemo(
+    () => (sharePrices ? computeAnnualizedYield(sharePrices) : null),
+    [sharePrices],
+  );
 
   return (
     <main className="min-h-screen bg-neutral-50 p-4 text-neutral-900 sm:p-8 dark:bg-neutral-950 dark:text-neutral-100">
       <div className="mx-auto max-w-6xl">
         <header>
-          <h1 className="text-2xl font-bold sm:text-3xl">USDKY Holders Tracker</h1>
+          <h1 className="text-2xl font-bold sm:text-3xl">KAST Earn Tracker</h1>
           <p className="mt-1 text-sm text-neutral-500">
-            Daily principal × multiplier snapshot of USDKY holders, bucketed by USD value.
+            Daily TVL snapshot across USDKY (Solana) and Gauntlet Alpha Vault (Base).
           </p>
         </header>
 
-        <div className="mt-4 flex flex-wrap items-center gap-4 rounded-md bg-white p-3 shadow dark:bg-neutral-900">
-          <label className="flex cursor-pointer items-center gap-3 select-none">
-            <button
-              type="button"
-              role="switch"
-              aria-checked={showHasSol}
-              onClick={() => setShowHasSol((v) => !v)}
-              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
-                showHasSol ? 'bg-blue-600' : 'bg-neutral-300 dark:bg-neutral-700'
-              }`}
-            >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                  showHasSol ? 'translate-x-6' : 'translate-x-1'
+        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-md bg-white p-3 shadow dark:bg-neutral-900">
+          <div className="inline-flex overflow-hidden rounded-md border border-neutral-200 dark:border-neutral-700">
+            {(['all', 'usdky', 'gauntlet'] as const).map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setService(s)}
+                className={`px-3 py-1.5 text-sm transition-colors ${
+                  service === s
+                    ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
+                    : 'bg-white text-neutral-700 hover:bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800'
                 }`}
-              />
-            </button>
-            <span className="text-sm">
-              Has SOL{' '}
-              <span className="text-xs text-neutral-500">
-                {showHasSol ? '(included)' : '(excluded — KAST users only)'}
+              >
+                {s === 'all' ? 'All' : s === 'usdky' ? 'USDKY' : 'Gauntlet Alpha'}
+              </button>
+            ))}
+          </div>
+          {service !== 'gauntlet' && (
+            <label className="flex cursor-pointer items-center gap-3 select-none">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={showHasSol}
+                onClick={() => setShowHasSol((v) => !v)}
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+                  showHasSol ? 'bg-blue-600' : 'bg-neutral-300 dark:bg-neutral-700'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                    showHasSol ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+              <span className="text-sm">
+                Has SOL{' '}
+                <span className="text-xs text-neutral-500">
+                  {showHasSol ? '(USDKY: included)' : '(USDKY: excluded — KAST users only)'}
+                </span>
               </span>
-            </span>
-          </label>
+            </label>
+          )}
           {loading && <span className="ml-auto text-xs text-neutral-500">loading…</span>}
         </div>
 
         {summary && (
-          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Stat label="Snapshot date" value={summary.snapshot_date ?? '—'} />
-            <Stat label="Holders" value={summary.holders.toLocaleString()} />
-            <Stat
-              label="Total USD"
-              value={`$${Math.round(summary.total_usd).toLocaleString()}`}
-            />
-            <Stat label="Multiplier" value={summary.multiplier.toFixed(6)} />
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+            {(service === 'all' || service === 'usdky') && (
+              <ServiceCard
+                title="USDKY"
+                accent="bg-blue-600"
+                rows={[
+                  ['Snapshot date', summary.usdky.snapshot_date ?? '—'],
+                  ['Holders', summary.usdky.holders.toLocaleString()],
+                  ['Total USD', `$${Math.round(summary.usdky.total_usd).toLocaleString()}`],
+                  ['Multiplier', summary.usdky.multiplier.toFixed(6)],
+                ]}
+              />
+            )}
+            {(service === 'all' || service === 'gauntlet') && (
+              <ServiceCard
+                title="Gauntlet Alpha"
+                accent="bg-violet-600"
+                rows={[
+                  ['Snapshot date', summary.gauntlet.snapshot_date ?? '—'],
+                  ['Holders', summary.gauntlet.holders.toLocaleString()],
+                  ['Total USD', `$${Math.round(summary.gauntlet.total_usd).toLocaleString()}`],
+                  ['Share price', summary.gauntlet.share_price.toFixed(6)],
+                  [
+                    'Annualized yield (30d)',
+                    annualizedYield == null ? '—' : `${(annualizedYield * 100).toFixed(2)}%`,
+                  ],
+                ]}
+              />
+            )}
           </div>
         )}
 
@@ -140,7 +226,9 @@ export default function Home() {
                 <YAxis
                   tick={{ fontSize: 11 }}
                   tickFormatter={(v: number) =>
-                    v >= 1_000_000 ? `$${(v / 1_000_000).toFixed(1)}M` : `$${(v / 1000).toFixed(0)}k`
+                    v >= 1_000_000
+                      ? `$${(v / 1_000_000).toFixed(1)}M`
+                      : `$${(v / 1000).toFixed(0)}k`
                   }
                 />
                 <Tooltip
@@ -150,15 +238,32 @@ export default function Home() {
                   ]}
                 />
                 <Legend />
-                {SIZE_BUCKETS.map((b) => (
-                  <Bar
-                    key={b}
-                    dataKey={b}
-                    stackId="size"
-                    fill={BUCKET_COLOR[b]}
-                    name={BUCKET_LABEL[b]}
-                  />
-                ))}
+                {service === 'all' ? (
+                  <>
+                    <Bar
+                      dataKey="usdky"
+                      stackId="service"
+                      fill={SERVICE_COLOR.usdky}
+                      name="USDKY"
+                    />
+                    <Bar
+                      dataKey="gauntlet"
+                      stackId="service"
+                      fill={SERVICE_COLOR.gauntlet}
+                      name="Gauntlet Alpha"
+                    />
+                  </>
+                ) : (
+                  SIZE_BUCKETS.map((b) => (
+                    <Bar
+                      key={b}
+                      dataKey={b}
+                      stackId="size"
+                      fill={BUCKET_COLOR[b]}
+                      name={BUCKET_LABEL[b]}
+                    />
+                  ))
+                )}
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -172,11 +277,26 @@ export default function Home() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function ServiceCard({
+  title,
+  accent,
+  rows,
+}: {
+  title: string;
+  accent: string;
+  rows: Array<[string, string]>;
+}) {
   return (
-    <div className="rounded-md bg-white p-3 shadow dark:bg-neutral-900">
-      <div className="text-xs uppercase tracking-wide text-neutral-500">{label}</div>
-      <div className="mt-1 font-mono text-base sm:text-lg">{value}</div>
+    <div className="overflow-hidden rounded-md bg-white shadow dark:bg-neutral-900">
+      <div className={`${accent} px-3 py-1.5 text-sm font-semibold text-white`}>{title}</div>
+      <dl className="grid grid-cols-2 gap-x-3 gap-y-2 p-3 sm:grid-cols-3">
+        {rows.map(([label, value]) => (
+          <div key={label}>
+            <dt className="text-xs uppercase tracking-wide text-neutral-500">{label}</dt>
+            <dd className="mt-1 font-mono text-sm sm:text-base">{value}</dd>
+          </div>
+        ))}
+      </dl>
     </div>
   );
 }
