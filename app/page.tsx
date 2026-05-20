@@ -21,12 +21,33 @@ const SIZE_BUCKETS = [
 ] as const;
 type SizeBucket = (typeof SIZE_BUCKETS)[number];
 
+// Nord palette (daisyUI nord theme)
+const NORD = {
+  polar0: '#2E3440',
+  polar1: '#3B4252',
+  polar2: '#434C5E',
+  polar3: '#4C566A',
+  snow0: '#D8DEE9',
+  snow1: '#E5E9F0',
+  snow2: '#ECEFF4',
+  frost0: '#8FBCBB',
+  frost1: '#88C0D0',
+  frost2: '#81A1C1',
+  frost3: '#5E81AC',
+  red: '#BF616A',
+  orange: '#D08770',
+  yellow: '#EBCB8B',
+  green: '#A3BE8C',
+  purple: '#B48EAD',
+} as const;
+
+// Size bucket gradient — frost (cool/small) → aurora (warm/large)
 const BUCKET_COLOR: Record<SizeBucket, string> = {
-  'whale_100k+': '#dc2626',
-  large_10k_100k: '#ea580c',
-  mid_1k_10k: '#facc15',
-  retail_100_1k: '#65a30d',
-  dust_lt_100: '#94a3b8',
+  dust_lt_100: NORD.frost1, // cyan
+  retail_100_1k: NORD.green,
+  mid_1k_10k: NORD.yellow,
+  large_10k_100k: NORD.orange,
+  'whale_100k+': NORD.red,
 };
 const BUCKET_LABEL: Record<SizeBucket, string> = {
   'whale_100k+': 'Whale ($100k+)',
@@ -36,9 +57,10 @@ const BUCKET_LABEL: Record<SizeBucket, string> = {
   dust_lt_100: 'Dust (<$100)',
 };
 
+// Service colors: frost (USDKY) and aurora purple (Gauntlet)
 const SERVICE_COLOR = {
-  usdky: '#2563eb',
-  gauntlet: '#7c3aed',
+  usdky: NORD.frost3,
+  gauntlet: NORD.purple,
 } as const;
 
 type Service = 'all' | 'usdky' | 'gauntlet';
@@ -127,17 +149,17 @@ export default function Home() {
   );
 
   return (
-    <main className="min-h-screen bg-neutral-50 p-4 text-neutral-900 sm:p-8 dark:bg-neutral-950 dark:text-neutral-100">
+    <main className="min-h-screen bg-[#ECEFF4] p-4 text-[#2E3440] sm:p-8 dark:bg-[#2E3440] dark:text-[#ECEFF4]">
       <div className="mx-auto max-w-6xl">
         <header>
           <h1 className="text-2xl font-bold sm:text-3xl">KAST Earn Tracker</h1>
-          <p className="mt-1 text-sm text-neutral-500">
+          <p className="mt-1 text-sm text-[#4C566A] dark:text-[#D8DEE9]">
             Daily TVL snapshot across USDKY (Solana) and Gauntlet Alpha Vault (Base).
           </p>
         </header>
 
-        <div className="mt-4 flex flex-wrap items-center gap-4 rounded-md bg-white p-3 shadow dark:bg-neutral-900">
-          <div className="inline-flex overflow-hidden rounded-md border border-neutral-200 dark:border-neutral-700">
+        <div className="mt-4 flex flex-wrap items-center gap-4 rounded-md border border-[#D8DEE9] bg-[#E5E9F0] p-3 shadow-sm dark:border-[#434C5E] dark:bg-[#3B4252]">
+          <div className="inline-flex overflow-hidden rounded-md border border-[#D8DEE9] dark:border-[#4C566A]">
             {(['all', 'usdky', 'gauntlet'] as const).map((s) => (
               <button
                 key={s}
@@ -145,8 +167,8 @@ export default function Home() {
                 onClick={() => setService(s)}
                 className={`px-3 py-1.5 text-sm transition-colors ${
                   service === s
-                    ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
-                    : 'bg-white text-neutral-700 hover:bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800'
+                    ? 'bg-[#5E81AC] text-white'
+                    : 'bg-[#ECEFF4] text-[#2E3440] hover:bg-[#D8DEE9] dark:bg-[#434C5E] dark:text-[#ECEFF4] dark:hover:bg-[#4C566A]'
                 }`}
               >
                 {s === 'all' ? 'All' : s === 'usdky' ? 'USDKY' : 'Gauntlet Alpha'}
@@ -160,7 +182,7 @@ export default function Home() {
               aria-checked={kastOnly}
               onClick={() => setKastOnly((v) => !v)}
               className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
-                kastOnly ? 'bg-blue-600' : 'bg-neutral-300 dark:bg-neutral-700'
+                kastOnly ? 'bg-[#5E81AC]' : 'bg-[#D8DEE9] dark:bg-[#4C566A]'
               }`}
             >
               <span
@@ -172,7 +194,7 @@ export default function Home() {
             <span className="flex items-center gap-1.5 text-sm">
               KAST users only
               <span
-                className="cursor-help text-xs text-neutral-400"
+                className="cursor-help text-xs text-[#4C566A] dark:text-[#D8DEE9]"
                 title={KAST_INFO_TEXT}
                 aria-label="KAST identification details"
               >
@@ -180,7 +202,9 @@ export default function Home() {
               </span>
             </span>
           </label>
-          {loading && <span className="ml-auto text-xs text-neutral-500">loading…</span>}
+          {loading && (
+            <span className="ml-auto text-xs text-[#4C566A] dark:text-[#D8DEE9]">loading…</span>
+          )}
         </div>
 
         {summary && (
@@ -188,7 +212,7 @@ export default function Home() {
             {(service === 'all' || service === 'usdky') && (
               <ServiceCard
                 title="USDKY"
-                accent="bg-blue-600"
+                accentBg="bg-[#5E81AC]"
                 rows={[
                   ['Snapshot date', summary.usdky.snapshot_date ?? '—'],
                   ['Holders', summary.usdky.holders.toLocaleString()],
@@ -201,7 +225,7 @@ export default function Home() {
             {(service === 'all' || service === 'gauntlet') && (
               <ServiceCard
                 title="Gauntlet Alpha"
-                accent="bg-violet-600"
+                accentBg="bg-[#B48EAD]"
                 rows={[
                   ['Snapshot date', summary.gauntlet.snapshot_date ?? '—'],
                   ['Holders', summary.gauntlet.holders.toLocaleString()],
@@ -212,28 +236,32 @@ export default function Home() {
                     annualizedYield == null ? '—' : `${(annualizedYield * 100).toFixed(2)}%`,
                   ],
                 ]}
-                note={
-                  kastOnly ? 'Filtered: wallets first funded via Bybit OTC' : null
-                }
+                note={kastOnly ? 'Filtered: wallets first funded via Bybit OTC' : null}
               />
             )}
           </div>
         )}
 
         {err && (
-          <p className="mt-4 rounded bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+          <p className="mt-4 rounded border border-[#BF616A] bg-[#BF616A]/10 p-3 text-sm text-[#BF616A]">
             {err}
           </p>
         )}
 
         {series && series.length > 0 && (
-          <div className="mt-6 h-[480px] rounded-md bg-white p-4 shadow sm:h-[520px] dark:bg-neutral-900">
+          <div className="mt-6 h-[480px] rounded-md border border-[#D8DEE9] bg-[#ECEFF4] p-4 shadow-sm sm:h-[520px] dark:border-[#434C5E] dark:bg-[#3B4252]">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={series} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
-                <CartesianGrid stroke="#e5e7eb" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+                <CartesianGrid stroke="#D8DEE9" strokeOpacity={0.6} vertical={false} />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fontSize: 11, fill: NORD.polar3 }}
+                  stroke={NORD.polar3}
+                  interval="preserveStartEnd"
+                />
                 <YAxis
-                  tick={{ fontSize: 11 }}
+                  tick={{ fontSize: 11, fill: NORD.polar3 }}
+                  stroke={NORD.polar3}
                   tickFormatter={(v: number) =>
                     v >= 1_000_000
                       ? `$${(v / 1_000_000).toFixed(1)}M`
@@ -241,12 +269,21 @@ export default function Home() {
                   }
                 />
                 <Tooltip
+                  contentStyle={{
+                    backgroundColor: NORD.snow2,
+                    border: `1px solid ${NORD.snow0}`,
+                    borderRadius: 6,
+                    color: NORD.polar0,
+                  }}
+                  labelStyle={{ color: NORD.polar0, fontWeight: 600 }}
+                  itemStyle={{ color: NORD.polar0 }}
+                  cursor={{ fill: NORD.snow0, opacity: 0.5 }}
                   formatter={(v, name) => [
                     `$${Math.round(Number(v ?? 0)).toLocaleString()}`,
                     String(name ?? ''),
                   ]}
                 />
-                <Legend />
+                <Legend wrapperStyle={{ color: NORD.polar3, fontSize: 12 }} />
                 {service === 'all' ? (
                   <>
                     <Bar
@@ -279,7 +316,9 @@ export default function Home() {
         )}
 
         {series && series.length === 0 && (
-          <p className="mt-6 text-neutral-500">No snapshot data — run the backfill first.</p>
+          <p className="mt-6 text-[#4C566A] dark:text-[#D8DEE9]">
+            No snapshot data — run the backfill first.
+          </p>
         )}
       </div>
     </main>
@@ -288,28 +327,32 @@ export default function Home() {
 
 function ServiceCard({
   title,
-  accent,
+  accentBg,
   rows,
   note,
 }: {
   title: string;
-  accent: string;
+  accentBg: string;
   rows: Array<[string, string]>;
   note: string | null;
 }) {
   return (
-    <div className="overflow-hidden rounded-md bg-white shadow dark:bg-neutral-900">
-      <div className={`${accent} px-3 py-1.5 text-sm font-semibold text-white`}>{title}</div>
+    <div className="overflow-hidden rounded-md border border-[#D8DEE9] bg-[#ECEFF4] shadow-sm dark:border-[#434C5E] dark:bg-[#3B4252]">
+      <div className={`${accentBg} px-3 py-1.5 text-sm font-semibold text-white`}>{title}</div>
       <dl className="grid grid-cols-2 gap-x-3 gap-y-2 p-3 sm:grid-cols-3">
         {rows.map(([label, value]) => (
           <div key={label}>
-            <dt className="text-xs uppercase tracking-wide text-neutral-500">{label}</dt>
-            <dd className="mt-1 font-mono text-sm sm:text-base">{value}</dd>
+            <dt className="text-xs uppercase tracking-wide text-[#4C566A] dark:text-[#D8DEE9]">
+              {label}
+            </dt>
+            <dd className="mt-1 font-mono text-sm text-[#2E3440] sm:text-base dark:text-[#ECEFF4]">
+              {value}
+            </dd>
           </div>
         ))}
       </dl>
       {note && (
-        <div className="border-t border-neutral-100 px-3 py-1.5 text-xs text-neutral-500 dark:border-neutral-800">
+        <div className="border-t border-[#D8DEE9] px-3 py-1.5 text-xs text-[#4C566A] dark:border-[#434C5E] dark:text-[#D8DEE9]">
           ※ {note}
         </div>
       )}

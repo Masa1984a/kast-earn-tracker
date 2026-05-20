@@ -1,8 +1,27 @@
 @import "tailwindcss";
 
+/* Nord palette (daisyUI nord theme) */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --nord-polar-0: #2E3440;
+  --nord-polar-1: #3B4252;
+  --nord-polar-2: #434C5E;
+  --nord-polar-3: #4C566A;
+  --nord-snow-0: #D8DEE9;
+  --nord-snow-1: #E5E9F0;
+  --nord-snow-2: #ECEFF4;
+  --nord-frost-0: #8FBCBB;
+  --nord-frost-1: #88C0D0;
+  --nord-frost-2: #81A1C1;
+  --nord-frost-3: #5E81AC;
+  --nord-aurora-red:    #BF616A;
+  --nord-aurora-orange: #D08770;
+  --nord-aurora-yellow: #EBCB8B;
+  --nord-aurora-green:  #A3BE8C;
+  --nord-aurora-purple: #B48EAD;
+
+  /* base-content / base-100 from daisyUI nord */
+  --background: var(--nord-snow-2);
+  --foreground: var(--nord-polar-0);
 }
 
 @theme inline {
@@ -14,8 +33,8 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: var(--nord-polar-0);
+    --foreground: var(--nord-snow-2);
   }
 }
 
