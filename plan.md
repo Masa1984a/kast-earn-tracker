@@ -1,7 +1,7 @@
 # USDKY Tracker - Implementation Plan
 
 最終更新: 2026-05-20
-進行状況: 44 / 47 (Phase 1-8) + Phase 9: 34/36 + Phase 10: 25/27 done（残 10.7.4 モバイル / 10.8.5 翌日 cron / 10.8.6 prod deploy）
+進行状況: 44 / 47 (Phase 1-8) + Phase 9: 34/36 + Phase 10: 26/27 done（残 10.7.4 モバイル視認 / 10.8.5 翌日 cron 自然実行）
 
 ---
 
@@ -288,7 +288,7 @@
 - [x] **10.8.3** Gauntlet KAST-only TVL が ~$45M 前後（推定）になることを確認 — `Done` (**実測 $4.13M / 4,408 holders** — 仕様書予想 $45M より大幅に低い。retail バイアスが想定以上に強い、有意な発見)
 - [x] **10.8.4** UI トグルで全サービス連動切り替え確認 — `Done` (API レイヤで両サービスフィルタ動作確認、SSR 200 OK)
 - [ ] **10.8.5** dune-kickoff cron 翌日自動実行で `kast_base_wallets` が更新されることを確認 — `Pending` (2026-05-21 以降)
-- [ ] **10.8.6** Production deploy + 全機能動作確認 — `In Progress` (commit 準備中)
+- [x] **10.8.6** Production deploy + 全機能動作確認 — `Done` (commit `74c0fea` push 済 / `/api/summary?kast_only=true` 4408 holders $4.13M / `/api/snapshots?kast_only=true` 200 OK / home 200 OK)
 
 ### Phase 10 Blockers / Notes
 - KAST 識別カバー率: ホルダー数で 68%、TVL ベースだと 50-60% になる可能性（retail バイアス）→ UI で「保守的下限」と明示
