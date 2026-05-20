@@ -112,8 +112,11 @@ function computeAnnualizedYield(points: SharePricePoint[], days = 30): number | 
   const startPrice = recent[0].share_price;
   const endPrice = recent[recent.length - 1].share_price;
   if (startPrice <= 0) return null;
-  const period = recent.length - 1;
-  return Math.pow(endPrice / startPrice, 365 / period) - 1;
+  const startMs = Date.parse(recent[0].date);
+  const endMs = Date.parse(recent[recent.length - 1].date);
+  const periodDays = (endMs - startMs) / 86_400_000;
+  if (!Number.isFinite(periodDays) || periodDays <= 0) return null;
+  return Math.pow(endPrice / startPrice, 365 / periodDays) - 1;
 }
 
 const KAST_INFO_TEXT = `KAST users are identified by service-specific on-chain signatures:
@@ -139,7 +142,8 @@ export default function Home() {
   const [kastOnly, setKastOnly] = useState<boolean>(true);
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [series, setSeries] = useState<SeriesPoint[] | null>(null);
-  const [sharePrices, setSharePrices] = useState<SharePricePoint[] | null>(null);
+  const [gauntletSharePrices, setGauntletSharePrices] = useState<SharePricePoint[] | null>(null);
+  const [usdkySharePrices, setUsdkySharePrices] = useState<SharePricePoint[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -157,19 +161,25 @@ export default function Home() {
       fetch(`/api/summary?${summaryQs.toString()}`).then((r) => r.json()),
       fetch(`/api/snapshots?${snapshotsQs.toString()}`).then((r) => r.json()),
       fetch('/api/share-prices?service=gauntlet').then((r) => r.json()),
+      fetch('/api/share-prices?service=usdky').then((r) => r.json()),
     ])
-      .then(([s, p, sp]) => {
+      .then(([s, p, gsp, usp]) => {
         setSummary(s as SummaryResponse);
         setSeries(p as SeriesPoint[]);
-        setSharePrices(sp as SharePricePoint[]);
+        setGauntletSharePrices(gsp as SharePricePoint[]);
+        setUsdkySharePrices(usp as SharePricePoint[]);
       })
       .catch((e: Error) => setErr(e.message))
       .finally(() => setLoading(false));
   }, [kastOnly, service]);
 
-  const annualizedYield = useMemo(
-    () => (sharePrices ? computeAnnualizedYield(sharePrices) : null),
-    [sharePrices],
+  const gauntletYield = useMemo(
+    () => (gauntletSharePrices ? computeAnnualizedYield(gauntletSharePrices) : null),
+    [gauntletSharePrices],
+  );
+  const usdkyYield = useMemo(
+    () => (usdkySharePrices ? computeAnnualizedYield(usdkySharePrices) : null),
+    [usdkySharePrices],
   );
 
   return (
@@ -241,7 +251,11 @@ export default function Home() {
                   ['Snapshot date', summary.usdky.snapshot_date ?? '—'],
                   ['Holders', summary.usdky.holders.toLocaleString()],
                   ['Total USD', `$${Math.round(summary.usdky.total_usd).toLocaleString()}`],
-                  ['Multiplier', summary.usdky.multiplier.toFixed(6)],
+                  ['Share price', summary.usdky.multiplier.toFixed(6)],
+                  [
+                    'Yield (30D)',
+                    usdkyYield == null ? '—' : `${(usdkyYield * 100).toFixed(2)}%`,
+                  ],
                 ]}
                 note={kastOnly ? 'Filtered: wallets without SOL balance' : null}
               />
@@ -256,8 +270,8 @@ export default function Home() {
                   ['Total USD', `$${Math.round(summary.gauntlet.total_usd).toLocaleString()}`],
                   ['Share price', summary.gauntlet.share_price.toFixed(6)],
                   [
-                    'Annualized yield (30d)',
-                    annualizedYield == null ? '—' : `${(annualizedYield * 100).toFixed(2)}%`,
+                    'Yield (30D)',
+                    gauntletYield == null ? '—' : `${(gauntletYield * 100).toFixed(2)}%`,
                   ],
                 ]}
                 note={kastOnly ? 'Filtered: wallets first funded via Bybit OTC' : null}
