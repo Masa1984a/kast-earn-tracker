@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Bar,
-  BarChart,
   CartesianGrid,
+  ComposedChart,
   Legend,
+  Line,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -41,9 +42,8 @@ const NORD = {
   purple: '#B48EAD',
 } as const;
 
-// Size bucket gradient — frost (cool/small) → aurora (warm/large)
 const BUCKET_COLOR: Record<SizeBucket, string> = {
-  dust_lt_100: NORD.frost1, // cyan
+  dust_lt_100: NORD.frost1,
   retail_100_1k: NORD.green,
   mid_1k_10k: NORD.yellow,
   large_10k_100k: NORD.orange,
@@ -57,10 +57,14 @@ const BUCKET_LABEL: Record<SizeBucket, string> = {
   dust_lt_100: 'Dust (<$100)',
 };
 
-// Service colors: frost (USDKY) and aurora purple (Gauntlet)
 const SERVICE_COLOR = {
   usdky: NORD.frost3,
   gauntlet: NORD.purple,
+} as const;
+
+const HOLDERS_LINE_COLOR = {
+  usdky: NORD.polar1,
+  gauntlet: NORD.orange,
 } as const;
 
 type Service = 'all' | 'usdky' | 'gauntlet';
@@ -83,8 +87,14 @@ interface SummaryResponse {
   kast_only: boolean;
 }
 
-type SizePoint = { date: string } & Partial<Record<SizeBucket, number>>;
-type ServicePoint = { date: string; usdky: number; gauntlet: number };
+type SizePoint = { date: string; holders: number } & Partial<Record<SizeBucket, number>>;
+type ServicePoint = {
+  date: string;
+  usdky: number;
+  gauntlet: number;
+  usdky_holders: number;
+  gauntlet_holders: number;
+};
 type SeriesPoint = SizePoint | ServicePoint;
 
 interface SharePricePoint {
@@ -109,6 +119,19 @@ const KAST_INFO_TEXT = `KAST users are identified by service-specific on-chain s
 • USDKY (Solana): wallets without SOL balance (KAST sponsors gas, so KAST users typically don't hold SOL)
 • Gauntlet Alpha (Base): wallets whose first USDC funding came from KAST's Bybit OTC onramp
 Coverage estimate: ~95% of USDKY holders, ~68% of Gauntlet holders.`;
+
+function isHolderSeries(name: unknown): boolean {
+  const s = String(name);
+  return s.includes('holders') || s.endsWith('Holders');
+}
+
+function formatTooltip(value: number | string, name: string): [string, string] {
+  const num = Number(value ?? 0);
+  if (isHolderSeries(name)) {
+    return [num.toLocaleString(), name];
+  }
+  return [`$${Math.round(num).toLocaleString()}`, name];
+}
 
 export default function Home() {
   const [service, setService] = useState<Service>('all');
@@ -251,8 +274,8 @@ export default function Home() {
         {series && series.length > 0 && (
           <div className="mt-6 h-[480px] rounded-md border border-[#D8DEE9] bg-[#ECEFF4] p-4 shadow-sm sm:h-[520px] dark:border-[#434C5E] dark:bg-[#3B4252]">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={series} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
-                <CartesianGrid stroke="#D8DEE9" strokeOpacity={0.6} vertical={false} />
+              <ComposedChart data={series} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
+                <CartesianGrid stroke={NORD.snow0} strokeOpacity={0.6} vertical={false} />
                 <XAxis
                   dataKey="date"
                   tick={{ fontSize: 11, fill: NORD.polar3 }}
@@ -260,6 +283,7 @@ export default function Home() {
                   interval="preserveStartEnd"
                 />
                 <YAxis
+                  yAxisId="left"
                   tick={{ fontSize: 11, fill: NORD.polar3 }}
                   stroke={NORD.polar3}
                   tickFormatter={(v: number) =>
@@ -267,6 +291,23 @@ export default function Home() {
                       ? `$${(v / 1_000_000).toFixed(1)}M`
                       : `$${(v / 1000).toFixed(0)}k`
                   }
+                />
+                <YAxis
+                  yAxisId="right"
+                  orientation="right"
+                  tick={{ fontSize: 11, fill: NORD.polar3 }}
+                  stroke={NORD.polar3}
+                  tickFormatter={(v: number) =>
+                    v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v)
+                  }
+                  label={{
+                    value: 'Holders',
+                    angle: 90,
+                    position: 'insideRight',
+                    fill: NORD.polar3,
+                    fontSize: 11,
+                    offset: -2,
+                  }}
                 />
                 <Tooltip
                   contentStyle={{
@@ -278,39 +319,70 @@ export default function Home() {
                   labelStyle={{ color: NORD.polar0, fontWeight: 600 }}
                   itemStyle={{ color: NORD.polar0 }}
                   cursor={{ fill: NORD.snow0, opacity: 0.5 }}
-                  formatter={(v, name) => [
-                    `$${Math.round(Number(v ?? 0)).toLocaleString()}`,
-                    String(name ?? ''),
-                  ]}
+                  formatter={(v, name) => formatTooltip(v as number, String(name))}
                 />
                 <Legend wrapperStyle={{ color: NORD.polar3, fontSize: 12 }} />
                 {service === 'all' ? (
                   <>
                     <Bar
+                      yAxisId="left"
                       dataKey="usdky"
                       stackId="service"
                       fill={SERVICE_COLOR.usdky}
                       name="USDKY"
                     />
                     <Bar
+                      yAxisId="left"
                       dataKey="gauntlet"
                       stackId="service"
                       fill={SERVICE_COLOR.gauntlet}
                       name="Gauntlet Alpha"
                     />
+                    <Line
+                      yAxisId="right"
+                      type="monotone"
+                      dataKey="usdky_holders"
+                      stroke={HOLDERS_LINE_COLOR.usdky}
+                      strokeWidth={2}
+                      dot={false}
+                      name="USDKY holders"
+                    />
+                    <Line
+                      yAxisId="right"
+                      type="monotone"
+                      dataKey="gauntlet_holders"
+                      stroke={HOLDERS_LINE_COLOR.gauntlet}
+                      strokeWidth={2}
+                      dot={false}
+                      name="Gauntlet holders"
+                    />
                   </>
                 ) : (
-                  SIZE_BUCKETS.map((b) => (
-                    <Bar
-                      key={b}
-                      dataKey={b}
-                      stackId="size"
-                      fill={BUCKET_COLOR[b]}
-                      name={BUCKET_LABEL[b]}
+                  <>
+                    {SIZE_BUCKETS.map((b) => (
+                      <Bar
+                        key={b}
+                        yAxisId="left"
+                        dataKey={b}
+                        stackId="size"
+                        fill={BUCKET_COLOR[b]}
+                        name={BUCKET_LABEL[b]}
+                      />
+                    ))}
+                    <Line
+                      yAxisId="right"
+                      type="monotone"
+                      dataKey="holders"
+                      stroke={
+                        service === 'usdky' ? HOLDERS_LINE_COLOR.usdky : HOLDERS_LINE_COLOR.gauntlet
+                      }
+                      strokeWidth={2}
+                      dot={false}
+                      name={service === 'usdky' ? 'USDKY holders' : 'Gauntlet holders'}
                     />
-                  ))
+                  </>
                 )}
-              </BarChart>
+              </ComposedChart>
             </ResponsiveContainer>
           </div>
         )}

@@ -20,12 +20,15 @@ type SizeRow = {
   mid_1k_10k: string;
   retail_100_1k: string;
   dust_lt_100: string;
+  holders: number;
 };
 
 type ServiceRow = {
   date: string;
   usdky: string;
   gauntlet: string;
+  usdky_holders: number;
+  gauntlet_holders: number;
 };
 
 function parseExclude(raw: string | null): string[] {
@@ -44,7 +47,7 @@ function isKastOnly(raw: string | null): boolean {
 
 function shapeSizeRows(rows: SizeRow[]) {
   return rows.map((r) => {
-    const obj: Record<string, string | number> = { date: r.date };
+    const obj: Record<string, string | number> = { date: r.date, holders: r.holders };
     for (const b of SIZE_BUCKETS) obj[b] = Number(r[b]);
     return obj;
   });
@@ -73,7 +76,8 @@ export async function GET(req: NextRequest) {
         COALESCE(SUM(usd_value) FILTER (WHERE usd_value >= 10000  AND usd_value < 100000), 0)::text AS "large_10k_100k",
         COALESCE(SUM(usd_value) FILTER (WHERE usd_value >= 1000   AND usd_value < 10000 ), 0)::text AS "mid_1k_10k",
         COALESCE(SUM(usd_value) FILTER (WHERE usd_value >= 100    AND usd_value < 1000  ), 0)::text AS "retail_100_1k",
-        COALESCE(SUM(usd_value) FILTER (WHERE usd_value < 100                            ), 0)::text AS "dust_lt_100"
+        COALESCE(SUM(usd_value) FILTER (WHERE usd_value < 100                            ), 0)::text AS "dust_lt_100",
+        COUNT(*)::int AS holders
       FROM usdky_snapshots s
       WHERE NOT EXISTS (
         SELECT 1 FROM kast_known_addresses k
@@ -94,7 +98,8 @@ export async function GET(req: NextRequest) {
             COALESCE(SUM(usd_value) FILTER (WHERE usd_value >= 10000  AND usd_value < 100000), 0)::text AS "large_10k_100k",
             COALESCE(SUM(usd_value) FILTER (WHERE usd_value >= 1000   AND usd_value < 10000 ), 0)::text AS "mid_1k_10k",
             COALESCE(SUM(usd_value) FILTER (WHERE usd_value >= 100    AND usd_value < 1000  ), 0)::text AS "retail_100_1k",
-            COALESCE(SUM(usd_value) FILTER (WHERE usd_value < 100                            ), 0)::text AS "dust_lt_100"
+            COALESCE(SUM(usd_value) FILTER (WHERE usd_value < 100                            ), 0)::text AS "dust_lt_100",
+            COUNT(*)::int AS holders
           FROM gauntlet_snapshots gs
           INNER JOIN kast_base_wallets kbw ON kbw.wallet = gs.holder
           GROUP BY snapshot_date
@@ -107,7 +112,8 @@ export async function GET(req: NextRequest) {
             COALESCE(SUM(usd_value) FILTER (WHERE usd_value >= 10000  AND usd_value < 100000), 0)::text AS "large_10k_100k",
             COALESCE(SUM(usd_value) FILTER (WHERE usd_value >= 1000   AND usd_value < 10000 ), 0)::text AS "mid_1k_10k",
             COALESCE(SUM(usd_value) FILTER (WHERE usd_value >= 100    AND usd_value < 1000  ), 0)::text AS "retail_100_1k",
-            COALESCE(SUM(usd_value) FILTER (WHERE usd_value < 100                            ), 0)::text AS "dust_lt_100"
+            COALESCE(SUM(usd_value) FILTER (WHERE usd_value < 100                            ), 0)::text AS "dust_lt_100",
+            COUNT(*)::int AS holders
           FROM gauntlet_snapshots
           GROUP BY snapshot_date
           ORDER BY snapshot_date
@@ -119,17 +125,21 @@ export async function GET(req: NextRequest) {
     ? ((await db`
         SELECT
           snapshot_date::text AS date,
-          COALESCE(SUM(usdky_usd), 0)::text   AS usdky,
-          COALESCE(SUM(gauntlet_usd), 0)::text AS gauntlet
+          COALESCE(SUM(usdky_usd), 0)::text     AS usdky,
+          COALESCE(SUM(gauntlet_usd), 0)::text  AS gauntlet,
+          COALESCE(SUM(usdky_h), 0)::int        AS usdky_holders,
+          COALESCE(SUM(gauntlet_h), 0)::int     AS gauntlet_holders
         FROM (
-          SELECT s.snapshot_date, s.usd_value AS usdky_usd, 0::numeric AS gauntlet_usd
+          SELECT s.snapshot_date,
+                 s.usd_value AS usdky_usd, 0::numeric AS gauntlet_usd,
+                 1 AS usdky_h, 0 AS gauntlet_h
           FROM usdky_snapshots s
           WHERE NOT EXISTS (
             SELECT 1 FROM kast_known_addresses k
             WHERE k.address = s.owner AND k.label = ANY(${exclude}::text[])
           )
           UNION ALL
-          SELECT gs.snapshot_date, 0::numeric, gs.usd_value
+          SELECT gs.snapshot_date, 0::numeric, gs.usd_value, 0, 1
           FROM gauntlet_snapshots gs
           INNER JOIN kast_base_wallets kbw ON kbw.wallet = gs.holder
         ) t
@@ -139,17 +149,21 @@ export async function GET(req: NextRequest) {
     : ((await db`
         SELECT
           snapshot_date::text AS date,
-          COALESCE(SUM(usdky_usd), 0)::text   AS usdky,
-          COALESCE(SUM(gauntlet_usd), 0)::text AS gauntlet
+          COALESCE(SUM(usdky_usd), 0)::text     AS usdky,
+          COALESCE(SUM(gauntlet_usd), 0)::text  AS gauntlet,
+          COALESCE(SUM(usdky_h), 0)::int        AS usdky_holders,
+          COALESCE(SUM(gauntlet_h), 0)::int     AS gauntlet_holders
         FROM (
-          SELECT s.snapshot_date, s.usd_value AS usdky_usd, 0::numeric AS gauntlet_usd
+          SELECT s.snapshot_date,
+                 s.usd_value AS usdky_usd, 0::numeric AS gauntlet_usd,
+                 1 AS usdky_h, 0 AS gauntlet_h
           FROM usdky_snapshots s
           WHERE NOT EXISTS (
             SELECT 1 FROM kast_known_addresses k
             WHERE k.address = s.owner AND k.label = ANY(${exclude}::text[])
           )
           UNION ALL
-          SELECT snapshot_date, 0::numeric, usd_value
+          SELECT snapshot_date, 0::numeric, usd_value, 0, 1
           FROM gauntlet_snapshots
         ) t
         GROUP BY snapshot_date
@@ -157,6 +171,12 @@ export async function GET(req: NextRequest) {
       `) as ServiceRow[]);
 
   return NextResponse.json(
-    rows.map((r) => ({ date: r.date, usdky: Number(r.usdky), gauntlet: Number(r.gauntlet) })),
+    rows.map((r) => ({
+      date: r.date,
+      usdky: Number(r.usdky),
+      gauntlet: Number(r.gauntlet),
+      usdky_holders: r.usdky_holders,
+      gauntlet_holders: r.gauntlet_holders,
+    })),
   );
 }
