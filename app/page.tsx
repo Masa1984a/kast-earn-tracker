@@ -540,6 +540,24 @@ export default function Home() {
             data={gauntletHolders}
           />
         </div>
+
+        <section className="mt-8 rounded-md border border-[#D8DEE9] bg-[#ECEFF4] p-6 text-center shadow-sm dark:border-[#434C5E] dark:bg-[#3B4252]">
+          <h2 className="text-xl font-bold sm:text-2xl">Join the KAST Community</h2>
+          <p className="mt-2 text-sm text-[#4C566A] dark:text-[#D8DEE9]">
+            New to KAST? Get started in 2 minutes:
+          </p>
+          <a
+            href="https://go.kast.xyz/VqVO/SAPPORO"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-4 inline-block rounded-md bg-[#5E81AC] px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#4C6991]"
+          >
+            Get started with KAST →
+          </a>
+          <p className="mt-4 text-xs text-[#4C566A] dark:text-[#D8DEE9]">
+            Store, earn, move, and spend stablecoins globally.
+          </p>
+        </section>
       </div>
     </main>
   );
