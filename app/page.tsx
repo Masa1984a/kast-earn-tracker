@@ -545,14 +545,14 @@ export default function Home() {
         </div>
 
         <section className="mt-8 rounded-md border border-[#D8DEE9] bg-[#ECEFF4] p-6 shadow-sm dark:border-[#434C5E] dark:bg-[#3B4252]">
-          <h2 className="text-xl font-bold sm:text-2xl">Join the KAST Community</h2>
+          <h2 className="text-xl font-bold sm:text-2xl">Not on KAST yet?</h2>
           <div className="mt-4 flex flex-col items-start gap-4 sm:flex-row sm:items-center">
             <div className="rounded bg-white p-2 shadow-sm">
               <QRCodeSVG value={KAST_CTA_URL} size={120} level="M" />
             </div>
             <div className="space-y-2 text-sm">
               <p className="text-[#4C566A] dark:text-[#D8DEE9]">
-                New to KAST? Get started in 2 minutes:
+                Sign up here. Get started in 2 minutes:
               </p>
               <a
                 href={KAST_CTA_URL}
