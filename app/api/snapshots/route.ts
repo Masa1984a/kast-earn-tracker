@@ -12,6 +12,9 @@ const SIZE_BUCKETS = [
 ] as const;
 
 const KAST_USDKY_EXCLUDE_LABELS = ['treasury', 'infra', 'has_sol'];
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const DEFAULT_START = '2026-01-07';
+const DEFAULT_END = '9999-12-31';
 
 type SizeRow = {
   date: string;
@@ -45,6 +48,11 @@ function isKastOnly(raw: string | null): boolean {
   return v === 'true' || v === '1' || v === 'yes';
 }
 
+function parseDate(raw: string | null, fallback: string): string {
+  if (raw && DATE_RE.test(raw)) return raw;
+  return fallback;
+}
+
 function shapeSizeRows(rows: SizeRow[]) {
   return rows.map((r) => {
     const obj: Record<string, string | number> = { date: r.date, holders: r.holders };
@@ -66,6 +74,8 @@ export async function GET(req: NextRequest) {
   const exclude = kastOnly
     ? KAST_USDKY_EXCLUDE_LABELS
     : parseExclude(req.nextUrl.searchParams.get('exclude'));
+  const start = parseDate(req.nextUrl.searchParams.get('start_date'), DEFAULT_START);
+  const end = parseDate(req.nextUrl.searchParams.get('end_date'), DEFAULT_END);
   const db = getDb();
 
   if (service === 'usdky') {
@@ -79,10 +89,11 @@ export async function GET(req: NextRequest) {
         COALESCE(SUM(usd_value) FILTER (WHERE usd_value < 100                            ), 0)::text AS "dust_lt_100",
         COUNT(*)::int AS holders
       FROM usdky_snapshots s
-      WHERE NOT EXISTS (
-        SELECT 1 FROM kast_known_addresses k
-        WHERE k.address = s.owner AND k.label = ANY(${exclude}::text[])
-      )
+      WHERE snapshot_date BETWEEN ${start}::date AND ${end}::date
+        AND NOT EXISTS (
+          SELECT 1 FROM kast_known_addresses k
+          WHERE k.address = s.owner AND k.label = ANY(${exclude}::text[])
+        )
       GROUP BY snapshot_date
       ORDER BY snapshot_date
     `) as SizeRow[];
@@ -102,6 +113,7 @@ export async function GET(req: NextRequest) {
             COUNT(*)::int AS holders
           FROM gauntlet_snapshots gs
           INNER JOIN kast_base_wallets kbw ON kbw.wallet = gs.holder
+          WHERE gs.snapshot_date BETWEEN ${start}::date AND ${end}::date
           GROUP BY snapshot_date
           ORDER BY snapshot_date
         `) as SizeRow[])
@@ -115,6 +127,7 @@ export async function GET(req: NextRequest) {
             COALESCE(SUM(usd_value) FILTER (WHERE usd_value < 100                            ), 0)::text AS "dust_lt_100",
             COUNT(*)::int AS holders
           FROM gauntlet_snapshots
+          WHERE snapshot_date BETWEEN ${start}::date AND ${end}::date
           GROUP BY snapshot_date
           ORDER BY snapshot_date
         `) as SizeRow[]);
@@ -134,14 +147,16 @@ export async function GET(req: NextRequest) {
                  s.usd_value AS usdky_usd, 0::numeric AS gauntlet_usd,
                  1 AS usdky_h, 0 AS gauntlet_h
           FROM usdky_snapshots s
-          WHERE NOT EXISTS (
-            SELECT 1 FROM kast_known_addresses k
-            WHERE k.address = s.owner AND k.label = ANY(${exclude}::text[])
-          )
+          WHERE s.snapshot_date BETWEEN ${start}::date AND ${end}::date
+            AND NOT EXISTS (
+              SELECT 1 FROM kast_known_addresses k
+              WHERE k.address = s.owner AND k.label = ANY(${exclude}::text[])
+            )
           UNION ALL
           SELECT gs.snapshot_date, 0::numeric, gs.usd_value, 0, 1
           FROM gauntlet_snapshots gs
           INNER JOIN kast_base_wallets kbw ON kbw.wallet = gs.holder
+          WHERE gs.snapshot_date BETWEEN ${start}::date AND ${end}::date
         ) t
         GROUP BY snapshot_date
         ORDER BY snapshot_date
@@ -158,13 +173,15 @@ export async function GET(req: NextRequest) {
                  s.usd_value AS usdky_usd, 0::numeric AS gauntlet_usd,
                  1 AS usdky_h, 0 AS gauntlet_h
           FROM usdky_snapshots s
-          WHERE NOT EXISTS (
-            SELECT 1 FROM kast_known_addresses k
-            WHERE k.address = s.owner AND k.label = ANY(${exclude}::text[])
-          )
+          WHERE s.snapshot_date BETWEEN ${start}::date AND ${end}::date
+            AND NOT EXISTS (
+              SELECT 1 FROM kast_known_addresses k
+              WHERE k.address = s.owner AND k.label = ANY(${exclude}::text[])
+            )
           UNION ALL
           SELECT snapshot_date, 0::numeric, usd_value, 0, 1
           FROM gauntlet_snapshots
+          WHERE snapshot_date BETWEEN ${start}::date AND ${end}::date
         ) t
         GROUP BY snapshot_date
         ORDER BY snapshot_date

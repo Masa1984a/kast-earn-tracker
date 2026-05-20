@@ -124,6 +124,12 @@ const KAST_INFO_TEXT = `KAST users are identified by service-specific on-chain s
 • Gauntlet Alpha (Base): wallets whose first USDC funding came from KAST's Bybit OTC onramp
 Coverage estimate: ~95% of USDKY holders, ~68% of Gauntlet holders.`;
 
+const DEFAULT_START_DATE = '2026-01-07';
+
+function todayISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function isHolderSeries(name: unknown): boolean {
   const s = String(name);
   return s.includes('holders') || s.endsWith('Holders');
@@ -140,6 +146,8 @@ function formatTooltip(value: number | string, name: string): [string, string] {
 export default function Home() {
   const [service, setService] = useState<Service>('all');
   const [kastOnly, setKastOnly] = useState<boolean>(true);
+  const [startDate, setStartDate] = useState<string>(DEFAULT_START_DATE);
+  const [endDate, setEndDate] = useState<string>(() => todayISO());
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [series, setSeries] = useState<SeriesPoint[] | null>(null);
   const [gauntletSharePrices, setGauntletSharePrices] = useState<SharePricePoint[] | null>(null);
@@ -147,21 +155,38 @@ export default function Home() {
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
+  const validRange = startDate <= endDate;
+
   useEffect(() => {
+    if (!validRange) return;
     setLoading(true);
     setErr(null);
 
-    const summaryQs = new URLSearchParams();
-    if (kastOnly) summaryQs.set('kast_only', 'true');
-    const snapshotsQs = new URLSearchParams({ bucket: 'size' });
+    const dateQs = (extra?: Record<string, string>) => {
+      const qs = new URLSearchParams({ start_date: startDate, end_date: endDate, ...extra });
+      if (kastOnly) qs.set('kast_only', 'true');
+      return qs;
+    };
+
+    const summaryQs = dateQs();
+    const snapshotsQs = dateQs({ bucket: 'size' });
     if (service !== 'all') snapshotsQs.set('service', service);
-    if (kastOnly) snapshotsQs.set('kast_only', 'true');
+    const gauntletPriceQs = new URLSearchParams({
+      service: 'gauntlet',
+      start_date: startDate,
+      end_date: endDate,
+    });
+    const usdkyPriceQs = new URLSearchParams({
+      service: 'usdky',
+      start_date: startDate,
+      end_date: endDate,
+    });
 
     Promise.all([
       fetch(`/api/summary?${summaryQs.toString()}`).then((r) => r.json()),
       fetch(`/api/snapshots?${snapshotsQs.toString()}`).then((r) => r.json()),
-      fetch('/api/share-prices?service=gauntlet').then((r) => r.json()),
-      fetch('/api/share-prices?service=usdky').then((r) => r.json()),
+      fetch(`/api/share-prices?${gauntletPriceQs.toString()}`).then((r) => r.json()),
+      fetch(`/api/share-prices?${usdkyPriceQs.toString()}`).then((r) => r.json()),
     ])
       .then(([s, p, gsp, usp]) => {
         setSummary(s as SummaryResponse);
@@ -171,7 +196,7 @@ export default function Home() {
       })
       .catch((e: Error) => setErr(e.message))
       .finally(() => setLoading(false));
-  }, [kastOnly, service]);
+  }, [kastOnly, service, startDate, endDate, validRange]);
 
   const gauntletYield = useMemo(
     () => (gauntletSharePrices ? computeAnnualizedYield(gauntletSharePrices) : null),
@@ -236,6 +261,42 @@ export default function Home() {
               </span>
             </span>
           </label>
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <label className="flex items-center gap-1.5">
+              <span className="text-xs text-[#4C566A] dark:text-[#D8DEE9]">From</span>
+              <input
+                type="date"
+                value={startDate}
+                max={endDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="rounded border border-[#D8DEE9] bg-[#ECEFF4] px-2 py-1 text-xs text-[#2E3440] focus:border-[#5E81AC] focus:outline-none dark:border-[#4C566A] dark:bg-[#434C5E] dark:text-[#ECEFF4] [color-scheme:light] dark:[color-scheme:dark]"
+              />
+            </label>
+            <label className="flex items-center gap-1.5">
+              <span className="text-xs text-[#4C566A] dark:text-[#D8DEE9]">To</span>
+              <input
+                type="date"
+                value={endDate}
+                min={startDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="rounded border border-[#D8DEE9] bg-[#ECEFF4] px-2 py-1 text-xs text-[#2E3440] focus:border-[#5E81AC] focus:outline-none dark:border-[#4C566A] dark:bg-[#434C5E] dark:text-[#ECEFF4] [color-scheme:light] dark:[color-scheme:dark]"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                setStartDate(DEFAULT_START_DATE);
+                setEndDate(todayISO());
+              }}
+              className="rounded border border-[#D8DEE9] px-2 py-1 text-xs text-[#4C566A] hover:bg-[#D8DEE9] dark:border-[#4C566A] dark:text-[#D8DEE9] dark:hover:bg-[#4C566A]"
+              aria-label="Reset date range to default"
+            >
+              Reset
+            </button>
+          </div>
+          {!validRange && (
+            <span className="text-xs text-[#BF616A]">From must be ≤ To</span>
+          )}
           {loading && (
             <span className="ml-auto text-xs text-[#4C566A] dark:text-[#D8DEE9]">loading…</span>
           )}
