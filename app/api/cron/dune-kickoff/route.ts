@@ -5,6 +5,9 @@ import {
   GAUNTLET_PRICE_QUERY_ID,
   GAUNTLET_SNAPSHOTS_QUERY_ID,
   GAUNTLET_VAULT,
+  KAST_BASE_WALLETS_QUERY_ID,
+  KAST_ONRAMP,
+  USDC_BASE,
 } from '@/lib/dune';
 
 export const maxDuration = 30;
@@ -72,6 +75,11 @@ export async function GET(req: NextRequest) {
       query_id: GAUNTLET_PRICE_QUERY_ID,
       job_kind: 'gauntlet_price',
       params: { start_date, end_date, vault: GAUNTLET_VAULT },
+    }),
+    kickoffJob(sql, {
+      query_id: KAST_BASE_WALLETS_QUERY_ID,
+      job_kind: 'kast_base_wallets_daily',
+      params: { vault: GAUNTLET_VAULT, usdc: USDC_BASE, kast_onramp: KAST_ONRAMP },
     }),
   ]);
 

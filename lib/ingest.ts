@@ -13,6 +13,11 @@ type PriceRow = {
   daily_volume_usdc?: number | string;
 };
 
+type KastWalletRow = {
+  wallet: string;
+  first_funded_at: string;
+};
+
 const SNAPSHOT_BATCH = 500;
 
 export async function ingestJobResults(
@@ -25,6 +30,9 @@ export async function ingestJobResults(
   }
   if (jobKind === 'gauntlet_price' || jobKind === 'gauntlet_price_backfill') {
     return ingestGauntletPrices(sql, rows as PriceRow[]);
+  }
+  if (jobKind === 'kast_base_wallets_daily' || jobKind === 'kast_base_wallets_backfill') {
+    return ingestKastBaseWallets(sql, rows as KastWalletRow[]);
   }
   throw new Error(`Unknown job_kind: ${jobKind}`);
 }
@@ -119,4 +127,32 @@ async function ingestGauntletPrices(
   `;
 
   return { inserted: rows.length };
+}
+
+async function ingestKastBaseWallets(
+  sql: NeonClient,
+  rows: KastWalletRow[],
+): Promise<{ inserted: number }> {
+  if (rows.length === 0) return { inserted: 0 };
+
+  let total = 0;
+  for (let i = 0; i < rows.length; i += SNAPSHOT_BATCH) {
+    const batch = rows.slice(i, i + SNAPSHOT_BATCH);
+    const wallets = batch.map((r) => r.wallet);
+    const fundedAts = batch.map((r) => r.first_funded_at);
+
+    await sql`
+      INSERT INTO kast_base_wallets (wallet, first_funded_at, last_updated_at)
+      SELECT * FROM unnest(
+        ${wallets}::text[],
+        ${fundedAts}::timestamptz[],
+        ${Array(batch.length).fill(new Date().toISOString())}::timestamptz[]
+      )
+      ON CONFLICT (wallet) DO UPDATE SET
+        last_updated_at = excluded.last_updated_at
+    `;
+    total += batch.length;
+  }
+
+  return { inserted: total };
 }

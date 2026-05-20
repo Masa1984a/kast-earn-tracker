@@ -41,8 +41,6 @@ const SERVICE_COLOR = {
   gauntlet: '#7c3aed',
 } as const;
 
-const NON_CUSTODIAL_LABELS = 'treasury,infra,has_sol';
-
 type Service = 'all' | 'usdky' | 'gauntlet';
 
 interface UsdkySummary {
@@ -60,6 +58,7 @@ interface GauntletSummary {
 interface SummaryResponse {
   usdky: UsdkySummary;
   gauntlet: GauntletSummary;
+  kast_only: boolean;
 }
 
 type SizePoint = { date: string } & Partial<Record<SizeBucket, number>>;
@@ -84,28 +83,32 @@ function computeAnnualizedYield(points: SharePricePoint[], days = 30): number | 
   return Math.pow(endPrice / startPrice, 365 / period) - 1;
 }
 
+const KAST_INFO_TEXT = `KAST users are identified by service-specific on-chain signatures:
+• USDKY (Solana): wallets without SOL balance (KAST sponsors gas, so KAST users typically don't hold SOL)
+• Gauntlet Alpha (Base): wallets whose first USDC funding came from KAST's Bybit OTC onramp
+Coverage estimate: ~95% of USDKY holders, ~68% of Gauntlet holders.`;
+
 export default function Home() {
   const [service, setService] = useState<Service>('all');
-  const [showHasSol, setShowHasSol] = useState<boolean>(false);
+  const [kastOnly, setKastOnly] = useState<boolean>(true);
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [series, setSeries] = useState<SeriesPoint[] | null>(null);
   const [sharePrices, setSharePrices] = useState<SharePricePoint[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
-  const excludeParam = showHasSol ? '' : NON_CUSTODIAL_LABELS;
-
   useEffect(() => {
     setLoading(true);
     setErr(null);
 
-    const summaryQs = excludeParam ? `?exclude=${excludeParam}` : '';
+    const summaryQs = new URLSearchParams();
+    if (kastOnly) summaryQs.set('kast_only', 'true');
     const snapshotsQs = new URLSearchParams({ bucket: 'size' });
     if (service !== 'all') snapshotsQs.set('service', service);
-    if (excludeParam) snapshotsQs.set('exclude', excludeParam);
+    if (kastOnly) snapshotsQs.set('kast_only', 'true');
 
     Promise.all([
-      fetch(`/api/summary${summaryQs}`).then((r) => r.json()),
+      fetch(`/api/summary?${summaryQs.toString()}`).then((r) => r.json()),
       fetch(`/api/snapshots?${snapshotsQs.toString()}`).then((r) => r.json()),
       fetch('/api/share-prices?service=gauntlet').then((r) => r.json()),
     ])
@@ -116,7 +119,7 @@ export default function Home() {
       })
       .catch((e: Error) => setErr(e.message))
       .finally(() => setLoading(false));
-  }, [excludeParam, service]);
+  }, [kastOnly, service]);
 
   const annualizedYield = useMemo(
     () => (sharePrices ? computeAnnualizedYield(sharePrices) : null),
@@ -133,7 +136,7 @@ export default function Home() {
           </p>
         </header>
 
-        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-md bg-white p-3 shadow dark:bg-neutral-900">
+        <div className="mt-4 flex flex-wrap items-center gap-4 rounded-md bg-white p-3 shadow dark:bg-neutral-900">
           <div className="inline-flex overflow-hidden rounded-md border border-neutral-200 dark:border-neutral-700">
             {(['all', 'usdky', 'gauntlet'] as const).map((s) => (
               <button
@@ -150,31 +153,33 @@ export default function Home() {
               </button>
             ))}
           </div>
-          {service !== 'gauntlet' && (
-            <label className="flex cursor-pointer items-center gap-3 select-none">
-              <button
-                type="button"
-                role="switch"
-                aria-checked={showHasSol}
-                onClick={() => setShowHasSol((v) => !v)}
-                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
-                  showHasSol ? 'bg-blue-600' : 'bg-neutral-300 dark:bg-neutral-700'
+          <label className="flex cursor-pointer items-center gap-3 select-none">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={kastOnly}
+              onClick={() => setKastOnly((v) => !v)}
+              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+                kastOnly ? 'bg-blue-600' : 'bg-neutral-300 dark:bg-neutral-700'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                  kastOnly ? 'translate-x-6' : 'translate-x-1'
                 }`}
+              />
+            </button>
+            <span className="flex items-center gap-1.5 text-sm">
+              KAST users only
+              <span
+                className="cursor-help text-xs text-neutral-400"
+                title={KAST_INFO_TEXT}
+                aria-label="KAST identification details"
               >
-                <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                    showHasSol ? 'translate-x-6' : 'translate-x-1'
-                  }`}
-                />
-              </button>
-              <span className="text-sm">
-                Has SOL{' '}
-                <span className="text-xs text-neutral-500">
-                  {showHasSol ? '(USDKY: included)' : '(USDKY: excluded — KAST users only)'}
-                </span>
+                ⓘ
               </span>
-            </label>
-          )}
+            </span>
+          </label>
           {loading && <span className="ml-auto text-xs text-neutral-500">loading…</span>}
         </div>
 
@@ -190,6 +195,7 @@ export default function Home() {
                   ['Total USD', `$${Math.round(summary.usdky.total_usd).toLocaleString()}`],
                   ['Multiplier', summary.usdky.multiplier.toFixed(6)],
                 ]}
+                note={kastOnly ? 'Filtered: wallets without SOL balance' : null}
               />
             )}
             {(service === 'all' || service === 'gauntlet') && (
@@ -206,6 +212,9 @@ export default function Home() {
                     annualizedYield == null ? '—' : `${(annualizedYield * 100).toFixed(2)}%`,
                   ],
                 ]}
+                note={
+                  kastOnly ? 'Filtered: wallets first funded via Bybit OTC' : null
+                }
               />
             )}
           </div>
@@ -281,10 +290,12 @@ function ServiceCard({
   title,
   accent,
   rows,
+  note,
 }: {
   title: string;
   accent: string;
   rows: Array<[string, string]>;
+  note: string | null;
 }) {
   return (
     <div className="overflow-hidden rounded-md bg-white shadow dark:bg-neutral-900">
@@ -297,6 +308,11 @@ function ServiceCard({
           </div>
         ))}
       </dl>
+      {note && (
+        <div className="border-t border-neutral-100 px-3 py-1.5 text-xs text-neutral-500 dark:border-neutral-800">
+          ※ {note}
+        </div>
+      )}
     </div>
   );
 }

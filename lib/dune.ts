@@ -4,8 +4,11 @@ const DUNE_API = 'https://api.dune.com/api/v1';
 
 export const GAUNTLET_SNAPSHOTS_QUERY_ID = 7534621;
 export const GAUNTLET_PRICE_QUERY_ID = 7543001;
+export const KAST_BASE_WALLETS_QUERY_ID = 7544316;
 
 export const GAUNTLET_VAULT = '0x000000000001CdB57E58Fa75Fe420a0f4D6640D5';
+export const USDC_BASE = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
+export const KAST_ONRAMP = '0x5E690CFd5598F8d0E335b96e9F2f1b1527b7a5bF';
 
 export type DuneExecutionState =
   | 'QUERY_STATE_PENDING'

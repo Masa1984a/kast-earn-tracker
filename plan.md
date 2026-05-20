@@ -1,7 +1,7 @@
 # USDKY Tracker - Implementation Plan
 
 最終更新: 2026-05-20
-進行状況: 44 / 47 tasks done (Phase 1-8) + Phase 9: 34 / 36 done (残: 9.10.6 モバイル視認 / 9.11.2 翌日 cron 自然実行 / 9.11.4 Stale 実運用監視)
+進行状況: 44 / 47 (Phase 1-8) + Phase 9: 34/36 + Phase 10: 25/27 done（残 10.7.4 モバイル / 10.8.5 翌日 cron / 10.8.6 prod deploy）
 
 ---
 
@@ -232,3 +232,65 @@
 - Aera MultiDepositorVault は ERC-4626 非互換 + read NAV 関数なし → share_price は Dune query 7543001（Enter event decode）に依存
 - 入力 token は USDC 前提。他 stablecoin 受け入れが始まると `enter_events_today` が急減するので要監視
 - `dune_jobs` は将来 `external_jobs` に rename 余地があるが、早期抽象化は避ける（仕様書 §7）
+
+---
+
+## Phase 10: KAST Users Filter (Bybit OTC signature)
+
+> 仕様: `phase10-kast-filter.md`
+> Dune Query: `7544316` (KAST-funded gtUSDa Alpha holders)
+> KAST onramp: Bybit OTC `0x5E690CFd5598F8d0E335b96e9F2f1b1527b7a5bF`
+> 期待結果: 約 4,409 wallets (Gauntlet holders の 68%)
+
+### 10.0 進行管理
+- [x] **10.0** plan.md に Phase 10 を追記 — `Done` (2026-05-20 起票)
+
+### 10.1 Dune query 作成 — **完了済**（ユーザー作成済）
+- [x] **10.1.1** §3 の query を Dune に新規作成 — `Done` (query ID `7544316`)
+- [x] **10.1.2** デフォルトパラメータ設定 — `Done` (vault / usdc / kast_onramp)
+- [x] **10.1.3** 動作確認 (約 4,409 行返ることを期待) — `Done` (ユーザー確認済)
+- [ ] **10.1.4** query ID を `lib/dune.ts` に追加 — `Pending` (10.3 と同時)
+
+### 10.2 スキーマ追加
+- [x] **10.2.1** `migrations/005_kast_base_wallets.sql` 作成（テーブル + `idx_kast_wallets_funded`） — `Done`
+- [x] **10.2.2** Neon に適用 — `Done` (2 statements / `kast_base_wallets` テーブル確認)
+
+### 10.3 取り込みロジック追加
+- [x] **10.3.1** `lib/dune.ts` に `KAST_BASE_WALLETS_QUERY_ID=7544316` + `USDC_BASE` + `KAST_ONRAMP` 定数追加 — `Done`
+- [x] **10.3.2** `lib/ingest.ts` dispatcher に `kast_base_wallets_daily` / `kast_base_wallets_backfill` を追加 — `Done`
+- [x] **10.3.3** `ingestKastBaseWallets` 実装（500件バッチ + `ON CONFLICT (wallet) DO UPDATE SET last_updated_at`） — `Done`
+
+### 10.4 Cron 更新
+- [x] **10.4.1** dune-kickoff cron に 3つ目の job (`kast_base_wallets_daily`) 追加 — `Done` (`Promise.all` 3並列)
+- [x] **10.4.2** 当日重複防止チェックが 3 job それぞれで動くことを確認 — `Done` (既存 `kickoffJob` は job_kind 別なので自動で 3 系統独立)
+
+### 10.5 バックフィル admin endpoint 更新
+- [x] **10.5.1** `kinds` パラメータに `kast_wallets` を追加（デフォルト `['snapshots','price','kast_wallets']` に拡張） — `Done` (`kast_wallets` のみなら `start_date`/`end_date` 不要にも対応)
+- [x] **10.5.2** ローカルから `kast_wallets` のみのバックフィル発動 — `Done` (job_id=5, 4分27秒で `completed`)
+- [x] **10.5.3** `kast_base_wallets` に約 4,409 件入ることを確認 — `Done` (**ジャスト 4,409 件** / earliest 2026-01-07 / latest 2026-05-20)
+
+### 10.6 API エンドポイント拡張
+- [x] **10.6.1** `/api/snapshots` に `kast_only` パラメータ追加 — `Done`
+- [x] **10.6.2** USDKY 側: `kast_only=true` で `treasury,infra,has_sol` を除外（既存 exclude ロジックに同居） — `Done` (kast_only=true 時は exclude を内部で `KAST_USDKY_EXCLUDE_LABELS` に置換)
+- [x] **10.6.3** Gauntlet 側: `kast_only=true` で `kast_base_wallets` と INNER JOIN — `Done`
+- [x] **10.6.4** `/api/summary` にも `kast_only` パラメータ追加（USDKY + Gauntlet 両方フィルタ） — `Done` (レスポンスに `kast_only` フラグも返却)
+- [x] **10.6.5** service × kast_only の組み合わせ 6 パターン動作確認 — `Done` (curl で `/api/summary` `/api/snapshots?service=...&kast_only=...` 全て 200 OK + 期待値返却)
+
+### 10.7 フロントエンド改修
+- [x] **10.7.1** 「Has SOL」トグルを「KAST users only」マスタートグルに変更（service フィルタと独立、両サービスに同時適用）— `Done` (デフォルト ON)
+- [x] **10.7.2** トグル ON 時に各サービスブロックに識別ロジック注釈表示 — `Done` (`ServiceCard` の `note` prop で「※ Filtered: ...」)
+- [x] **10.7.3** 情報アイコン + ホバー説明テキスト（USDKY: no SOL / Gauntlet: Bybit OTC funded）— `Done` (ⓘ + title 属性)
+- [ ] **10.7.4** モバイル responsive 確認 — `Pending` (10.8.6 deploy 後)
+
+### 10.8 動作確認 + 本番デプロイ
+- [x] **10.8.1** バックフィル後の `kast_base_wallets` レコード数確認（約 4,409 想定）— `Done` (4,409 件)
+- [x] **10.8.2** 検証 wallet `0x371002...02cae` が `kast_base_wallets` に含まれることを確認 — `Done` (first_funded 2026-01-16 / source `bybit_otc_signature`)
+- [x] **10.8.3** Gauntlet KAST-only TVL が ~$45M 前後（推定）になることを確認 — `Done` (**実測 $4.13M / 4,408 holders** — 仕様書予想 $45M より大幅に低い。retail バイアスが想定以上に強い、有意な発見)
+- [x] **10.8.4** UI トグルで全サービス連動切り替え確認 — `Done` (API レイヤで両サービスフィルタ動作確認、SSR 200 OK)
+- [ ] **10.8.5** dune-kickoff cron 翌日自動実行で `kast_base_wallets` が更新されることを確認 — `Pending` (2026-05-21 以降)
+- [ ] **10.8.6** Production deploy + 全機能動作確認 — `In Progress` (commit 準備中)
+
+### Phase 10 Blockers / Notes
+- KAST 識別カバー率: ホルダー数で 68%、TVL ベースだと 50-60% になる可能性（retail バイアス）→ UI で「保守的下限」と明示
+- `KAST_ONRAMP` が将来変更される可能性あり。複数 onramp になったら Dune query の `WHERE first_funder IN (...)` で対応
+- `kast_base_wallets` は **insert / update only、delete なし**（時系列分析用に履歴保持）
