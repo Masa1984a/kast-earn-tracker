@@ -105,6 +105,27 @@ interface SharePricePoint {
   daily_volume_usdc: number;
 }
 
+interface UsdkyHolderRow {
+  wallet: string;
+  usd_value: number;
+  principal: number;
+  multiplier: number;
+}
+interface GauntletHolderRow {
+  wallet: string;
+  usd_value: number;
+  shares: number;
+  share_price: number;
+}
+interface HoldersResponse<T> {
+  service: 'usdky' | 'gauntlet';
+  snapshot_date: string | null;
+  total: number;
+  holders: T[];
+}
+
+const HOLDERS_LIMIT = 100;
+
 function computeAnnualizedYield(points: SharePricePoint[], days = 30): number | null {
   if (points.length < 2) return null;
   const recent = points.slice(-days);
@@ -152,6 +173,10 @@ export default function Home() {
   const [series, setSeries] = useState<SeriesPoint[] | null>(null);
   const [gauntletSharePrices, setGauntletSharePrices] = useState<SharePricePoint[] | null>(null);
   const [usdkySharePrices, setUsdkySharePrices] = useState<SharePricePoint[] | null>(null);
+  const [usdkyHolders, setUsdkyHolders] = useState<HoldersResponse<UsdkyHolderRow> | null>(null);
+  const [gauntletHolders, setGauntletHolders] = useState<HoldersResponse<GauntletHolderRow> | null>(
+    null,
+  );
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -181,18 +206,32 @@ export default function Home() {
       start_date: startDate,
       end_date: endDate,
     });
+    const holdersQs = (svc: 'usdky' | 'gauntlet') => {
+      const qs = new URLSearchParams({
+        service: svc,
+        start_date: startDate,
+        end_date: endDate,
+        limit: String(HOLDERS_LIMIT),
+      });
+      if (kastOnly) qs.set('kast_only', 'true');
+      return qs;
+    };
 
     Promise.all([
       fetch(`/api/summary?${summaryQs.toString()}`).then((r) => r.json()),
       fetch(`/api/snapshots?${snapshotsQs.toString()}`).then((r) => r.json()),
       fetch(`/api/share-prices?${gauntletPriceQs.toString()}`).then((r) => r.json()),
       fetch(`/api/share-prices?${usdkyPriceQs.toString()}`).then((r) => r.json()),
+      fetch(`/api/holders?${holdersQs('usdky').toString()}`).then((r) => r.json()),
+      fetch(`/api/holders?${holdersQs('gauntlet').toString()}`).then((r) => r.json()),
     ])
-      .then(([s, p, gsp, usp]) => {
+      .then(([s, p, gsp, usp, uh, gh]) => {
         setSummary(s as SummaryResponse);
         setSeries(p as SeriesPoint[]);
         setGauntletSharePrices(gsp as SharePricePoint[]);
         setUsdkySharePrices(usp as SharePricePoint[]);
+        setUsdkyHolders(uh as HoldersResponse<UsdkyHolderRow>);
+        setGauntletHolders(gh as HoldersResponse<GauntletHolderRow>);
       })
       .catch((e: Error) => setErr(e.message))
       .finally(() => setLoading(false));
@@ -468,8 +507,125 @@ export default function Home() {
             No snapshot data — run the backfill first.
           </p>
         )}
+
+        <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2">
+          <HoldersTable
+            title="USDKY"
+            accentBg="bg-[#5E81AC]"
+            explorer="solana"
+            data={usdkyHolders}
+            extraColumns={(row) => (
+              <td className="px-2 py-1 text-right font-mono text-[#4C566A] dark:text-[#D8DEE9]">
+                {row.multiplier.toFixed(6)}
+              </td>
+            )}
+            extraHeader={<th className="px-2 py-1 text-right font-medium">Multiplier</th>}
+          />
+          <HoldersTable
+            title="Gauntlet Alpha"
+            accentBg="bg-[#B48EAD]"
+            explorer="base"
+            data={gauntletHolders}
+            extraColumns={(row) => (
+              <td className="px-2 py-1 text-right font-mono text-[#4C566A] dark:text-[#D8DEE9]">
+                {row.shares.toFixed(4)}
+              </td>
+            )}
+            extraHeader={<th className="px-2 py-1 text-right font-medium">Shares</th>}
+          />
+        </div>
       </div>
     </main>
+  );
+}
+
+function truncateAddress(addr: string): string {
+  if (addr.length <= 14) return addr;
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+}
+
+function explorerUrl(explorer: 'solana' | 'base', addr: string): string {
+  return explorer === 'solana'
+    ? `https://solscan.io/account/${addr}`
+    : `https://basescan.org/address/${addr}`;
+}
+
+function HoldersTable<T extends { wallet: string; usd_value: number }>({
+  title,
+  accentBg,
+  explorer,
+  data,
+  extraHeader,
+  extraColumns,
+}: {
+  title: string;
+  accentBg: string;
+  explorer: 'solana' | 'base';
+  data: HoldersResponse<T> | null;
+  extraHeader?: React.ReactNode;
+  extraColumns?: (row: T) => React.ReactNode;
+}) {
+  return (
+    <div className="overflow-hidden rounded-md border border-[#D8DEE9] bg-[#ECEFF4] shadow-sm dark:border-[#434C5E] dark:bg-[#3B4252]">
+      <div
+        className={`${accentBg} flex items-center justify-between px-3 py-1.5 text-sm font-semibold text-white`}
+      >
+        <span>{title} — holders</span>
+        <span className="text-xs font-normal opacity-90">
+          {data
+            ? `Top ${Math.min(data.holders.length, HOLDERS_LIMIT)} of ${data.total.toLocaleString()}${
+                data.snapshot_date ? ` · ${data.snapshot_date}` : ''
+              }`
+            : 'loading…'}
+        </span>
+      </div>
+      <div className="max-h-[420px] overflow-y-auto">
+        <table className="w-full text-xs">
+          <thead className="sticky top-0 bg-[#E5E9F0] text-[#2E3440] dark:bg-[#434C5E] dark:text-[#ECEFF4]">
+            <tr>
+              <th className="px-2 py-1.5 text-left font-medium">#</th>
+              <th className="px-2 py-1.5 text-left font-medium">Wallet</th>
+              <th className="px-2 py-1.5 text-right font-medium">USD</th>
+              {extraHeader}
+            </tr>
+          </thead>
+          <tbody>
+            {data && data.holders.length === 0 && (
+              <tr>
+                <td
+                  colSpan={extraHeader ? 4 : 3}
+                  className="px-2 py-3 text-center text-[#4C566A] dark:text-[#D8DEE9]"
+                >
+                  No holders in range
+                </td>
+              </tr>
+            )}
+            {data?.holders.map((h, i) => (
+              <tr
+                key={h.wallet}
+                className="border-t border-[#D8DEE9]/60 hover:bg-[#E5E9F0] dark:border-[#434C5E] dark:hover:bg-[#434C5E]"
+              >
+                <td className="px-2 py-1 text-[#4C566A] dark:text-[#D8DEE9]">{i + 1}</td>
+                <td className="px-2 py-1 font-mono">
+                  <a
+                    href={explorerUrl(explorer, h.wallet)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[#5E81AC] hover:underline dark:text-[#88C0D0]"
+                  >
+                    {truncateAddress(h.wallet)}
+                  </a>
+                </td>
+                <td className="px-2 py-1 text-right font-mono">
+                  ${Math.round(h.usd_value).toLocaleString()}
+                </td>
+                {extraColumns?.(h)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
