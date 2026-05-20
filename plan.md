@@ -1,7 +1,7 @@
 # USDKY Tracker - Implementation Plan
 
 最終更新: 2026-05-20
-進行状況: 44 / 47 tasks done (Phase 1-8) + Phase 9 進行中（22 / 36 done — 9.0-9.8 ほぼ完走、smoke test PASS）
+進行状況: 44 / 47 tasks done (Phase 1-8) + Phase 9: 34 / 36 done (残: 9.10.6 モバイル視認 / 9.11.2 翌日 cron 自然実行 / 9.11.4 Stale 実運用監視)
 
 ---
 
@@ -171,7 +171,7 @@
 - [x] **9.3.1** `lib/dune.ts` を新規作成 — `Done` (`lib/dune.ts`)
 - [x] **9.3.2** `executeQuery` / `getExecutionStatus` / `getExecutionResults` 実装（+ `DuneExecutionState` 型）— `Done`
 - [x] **9.3.3** Query ID 定数 `GAUNTLET_SNAPSHOTS_QUERY_ID=7534621` / `GAUNTLET_PRICE_QUERY_ID=7543001` 定義 — `Done`
-- [ ] **9.3.4** `DUNE_API_KEY` を `.env.local`（投入済）+ Vercel ダッシュボードに反映 — `Pending` (local OK / Vercel 未 — 9.11 デプロイ前に確認)
+- [x] **9.3.4** `DUNE_API_KEY` を `.env.local`（投入済）+ Vercel ダッシュボードに反映 — `Done` (local 投入済 / Vercel もユーザーが設定済)
 
 ### 9.4 ジョブ取り込みロジック
 - [x] **9.4.1** `lib/ingest.ts` を新規作成 — `Done` (`lib/ingest.ts`)
@@ -220,11 +220,11 @@
 
 ### 9.11 動作確認 + 本番デプロイ
 - [x] **9.11.1** Gauntlet バックフィル後の 3 テーブルレコード件数・日付範囲確認 — `Done` (dune_jobs 4 jobs / gauntlet_snapshots 658,179 rows / gauntlet_share_prices 350 rows / 2025-06-05 .. 2026-05-20)
-- [ ] **9.11.2** dune-kickoff cron 翌日自動実行 → poll cron が 10 分以内に両 jobs 取り込み確認 — `Pending`
+- [ ] **9.11.2** dune-kickoff cron 翌日自動実行 → poll cron が 10 分以内に両 jobs 取り込み確認 — `Pending` (翌日 00:20 UTC 自然実行待ち / 2026-05-21 確認)
 - [x] **9.11.3** Base wallet `0x371002...02cae` の最新 `usd_value` が KAST アプリ表示 **$1.01** と一致 — `Done` (smoke test 結果 $1.0091 で完全一致)
-- [ ] **9.11.4** Stale 掃除動作確認（わざと 1h 以上 executing 放置）— `Pending`
-- [ ] **9.11.5** price のみ再バックフィル → `usd_value` auto-recompute を確認 — `Pending`
-- [ ] **9.11.6** Production deploy + 全機能動作確認 — `Pending`
+- [ ] **9.11.4** Stale 掃除動作確認（わざと 1h 以上 executing 放置）— `Pending` (本番運用上は意図的に再現困難。コードレビュー済として運用後監視)
+- [x] **9.11.5** price のみ再バックフィル → `usd_value` auto-recompute を確認 — `Done` (smoke test → full backfill で同期間の price が更新され usd_value も再計算されたことを確認。コードの `IS DISTINCT FROM` で no-op を除外)
+- [x] **9.11.6** Production deploy + 全機能動作確認 — `Done` (Vercel deploy 成功 / `/api/summary` `/api/snapshots` `/api/share-prices` `/api/cron/dune-poll` 全て 200 OK / cron Bearer auth 401 OK)
 
 ### Phase 9 Blockers / Notes
 - 9.1 関所完了済（2026-05-20）→ 9.2 以降に着手可
