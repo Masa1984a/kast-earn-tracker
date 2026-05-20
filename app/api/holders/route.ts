@@ -86,7 +86,7 @@ export async function GET(req: NextRequest) {
             SELECT 1 FROM kast_known_addresses k
             WHERE k.address = s.owner AND k.label = ANY(${exclude}::text[])
           )
-        ORDER BY usd_value DESC
+        ORDER BY s.usd_value DESC
         LIMIT ${limit}
       `,
     ])) as [
@@ -135,7 +135,7 @@ export async function GET(req: NextRequest) {
           FROM gauntlet_snapshots gs
           INNER JOIN kast_base_wallets kbw ON kbw.wallet = gs.holder
           WHERE gs.snapshot_date = ${snapshotDate}::date
-          ORDER BY gs.usd_value DESC
+          ORDER BY gs.usd_value DESC NULLS LAST
           LIMIT ${limit}
         `,
       ])) as [
@@ -156,7 +156,7 @@ export async function GET(req: NextRequest) {
             share_price::text AS share_price
           FROM gauntlet_snapshots
           WHERE snapshot_date = ${snapshotDate}::date
-          ORDER BY usd_value DESC
+          ORDER BY gauntlet_snapshots.usd_value DESC NULLS LAST
           LIMIT ${limit}
         `,
       ])) as [
