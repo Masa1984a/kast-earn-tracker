@@ -326,18 +326,6 @@ export default function Home() {
                 className="rounded border border-[#D8DEE9] bg-[#ECEFF4] px-2 py-1 text-xs text-[#2E3440] focus:border-[#5E81AC] focus:outline-none dark:border-[#4C566A] dark:bg-[#434C5E] dark:text-[#ECEFF4] [color-scheme:light] dark:[color-scheme:dark]"
               />
             </label>
-            <button
-              type="button"
-              onClick={() => {
-                setStartDate(DEFAULT_START_DATE);
-                setEndDate(todayISO());
-                setWallet('');
-              }}
-              className="rounded border border-[#D8DEE9] px-2 py-1 text-xs text-[#4C566A] hover:bg-[#D8DEE9] dark:border-[#4C566A] dark:text-[#D8DEE9] dark:hover:bg-[#4C566A]"
-              aria-label="Reset filters to default"
-            >
-              Reset
-            </button>
           </div>
           <label className="flex items-center gap-1.5 text-sm">
             <span className="text-xs text-[#4C566A] dark:text-[#D8DEE9]">Wallet</span>
@@ -351,6 +339,18 @@ export default function Home() {
               className="w-64 rounded border border-[#D8DEE9] bg-[#ECEFF4] px-2 py-1 font-mono text-xs text-[#2E3440] placeholder:text-[#9aa4b2] focus:border-[#5E81AC] focus:outline-none dark:border-[#4C566A] dark:bg-[#434C5E] dark:text-[#ECEFF4] dark:placeholder:text-[#7b8595]"
             />
           </label>
+          <button
+            type="button"
+            onClick={() => {
+              setStartDate(DEFAULT_START_DATE);
+              setEndDate(todayISO());
+              setWallet('');
+            }}
+            className="rounded border border-[#D8DEE9] px-2 py-1 text-xs text-[#4C566A] hover:bg-[#D8DEE9] dark:border-[#4C566A] dark:text-[#D8DEE9] dark:hover:bg-[#4C566A]"
+            aria-label="Reset filters to default"
+          >
+            Reset
+          </button>
           {!validRange && (
             <span className="text-xs text-[#BF616A]">From must be ≤ To</span>
           )}
