@@ -62,9 +62,10 @@ const SERVICE_COLOR = {
   gauntlet: NORD.purple,
 } as const;
 
+// Holders lines: vivid primaries so they pop on top of the Nord-toned bars.
 const HOLDERS_LINE_COLOR = {
-  usdky: NORD.polar1,
-  gauntlet: NORD.orange,
+  usdky: '#DC2626',
+  gauntlet: '#16A34A',
 } as const;
 
 type Service = 'all' | 'usdky' | 'gauntlet';
