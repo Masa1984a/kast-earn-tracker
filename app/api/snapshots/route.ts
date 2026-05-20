@@ -53,6 +53,13 @@ function parseDate(raw: string | null, fallback: string): string {
   return fallback;
 }
 
+function parseWallet(raw: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  return /^0x[0-9a-fA-F]{40}$/.test(trimmed) ? trimmed.toLowerCase() : trimmed;
+}
+
 function shapeSizeRows(rows: SizeRow[]) {
   return rows.map((r) => {
     const obj: Record<string, string | number> = { date: r.date, holders: r.holders };
@@ -76,6 +83,7 @@ export async function GET(req: NextRequest) {
     : parseExclude(req.nextUrl.searchParams.get('exclude'));
   const start = parseDate(req.nextUrl.searchParams.get('start_date'), DEFAULT_START);
   const end = parseDate(req.nextUrl.searchParams.get('end_date'), DEFAULT_END);
+  const wallet = parseWallet(req.nextUrl.searchParams.get('wallet'));
   const db = getDb();
 
   if (service === 'usdky') {
@@ -90,6 +98,7 @@ export async function GET(req: NextRequest) {
         COUNT(*)::int AS holders
       FROM usdky_snapshots s
       WHERE snapshot_date BETWEEN ${start}::date AND ${end}::date
+        AND (${wallet}::text IS NULL OR s.owner = ${wallet}::text)
         AND NOT EXISTS (
           SELECT 1 FROM kast_known_addresses k
           WHERE k.address = s.owner AND k.label = ANY(${exclude}::text[])
@@ -114,6 +123,7 @@ export async function GET(req: NextRequest) {
           FROM gauntlet_snapshots gs
           INNER JOIN kast_base_wallets kbw ON kbw.wallet = gs.holder
           WHERE gs.snapshot_date BETWEEN ${start}::date AND ${end}::date
+            AND (${wallet}::text IS NULL OR gs.holder = ${wallet}::text)
           GROUP BY snapshot_date
           ORDER BY snapshot_date
         `) as SizeRow[])
@@ -128,6 +138,7 @@ export async function GET(req: NextRequest) {
             COUNT(*)::int AS holders
           FROM gauntlet_snapshots
           WHERE snapshot_date BETWEEN ${start}::date AND ${end}::date
+            AND (${wallet}::text IS NULL OR holder = ${wallet}::text)
           GROUP BY snapshot_date
           ORDER BY snapshot_date
         `) as SizeRow[]);
@@ -148,6 +159,7 @@ export async function GET(req: NextRequest) {
                  1 AS usdky_h, 0 AS gauntlet_h
           FROM usdky_snapshots s
           WHERE s.snapshot_date BETWEEN ${start}::date AND ${end}::date
+            AND (${wallet}::text IS NULL OR s.owner = ${wallet}::text)
             AND NOT EXISTS (
               SELECT 1 FROM kast_known_addresses k
               WHERE k.address = s.owner AND k.label = ANY(${exclude}::text[])
@@ -157,6 +169,7 @@ export async function GET(req: NextRequest) {
           FROM gauntlet_snapshots gs
           INNER JOIN kast_base_wallets kbw ON kbw.wallet = gs.holder
           WHERE gs.snapshot_date BETWEEN ${start}::date AND ${end}::date
+            AND (${wallet}::text IS NULL OR gs.holder = ${wallet}::text)
         ) t
         GROUP BY snapshot_date
         ORDER BY snapshot_date
@@ -174,6 +187,7 @@ export async function GET(req: NextRequest) {
                  1 AS usdky_h, 0 AS gauntlet_h
           FROM usdky_snapshots s
           WHERE s.snapshot_date BETWEEN ${start}::date AND ${end}::date
+            AND (${wallet}::text IS NULL OR s.owner = ${wallet}::text)
             AND NOT EXISTS (
               SELECT 1 FROM kast_known_addresses k
               WHERE k.address = s.owner AND k.label = ANY(${exclude}::text[])
@@ -182,6 +196,7 @@ export async function GET(req: NextRequest) {
           SELECT snapshot_date, 0::numeric, usd_value, 0, 1
           FROM gauntlet_snapshots
           WHERE snapshot_date BETWEEN ${start}::date AND ${end}::date
+            AND (${wallet}::text IS NULL OR holder = ${wallet}::text)
         ) t
         GROUP BY snapshot_date
         ORDER BY snapshot_date

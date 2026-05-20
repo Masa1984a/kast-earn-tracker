@@ -27,6 +27,13 @@ function parseDate(raw: string | null, fallback: string): string {
   return fallback;
 }
 
+function parseWallet(raw: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  return /^0x[0-9a-fA-F]{40}$/.test(trimmed) ? trimmed.toLowerCase() : trimmed;
+}
+
 type UsdkyRow = {
   snapshot_date: string;
   holders: number;
@@ -48,6 +55,7 @@ export async function GET(req: NextRequest) {
     : parseExclude(req.nextUrl.searchParams.get('exclude'));
   const start = parseDate(req.nextUrl.searchParams.get('start_date'), DEFAULT_START);
   const end = parseDate(req.nextUrl.searchParams.get('end_date'), DEFAULT_END);
+  const wallet = parseWallet(req.nextUrl.searchParams.get('wallet'));
   const db = getDb();
 
   const gauntletPromise = kastOnly
@@ -64,6 +72,7 @@ export async function GET(req: NextRequest) {
           FROM gauntlet_snapshots
           WHERE snapshot_date BETWEEN ${start}::date AND ${end}::date
         )
+          AND (${wallet}::text IS NULL OR gs.holder = ${wallet}::text)
         GROUP BY gs.snapshot_date
       `
     : db`
@@ -78,6 +87,7 @@ export async function GET(req: NextRequest) {
           FROM gauntlet_snapshots
           WHERE snapshot_date BETWEEN ${start}::date AND ${end}::date
         )
+          AND (${wallet}::text IS NULL OR holder = ${wallet}::text)
         GROUP BY snapshot_date
       `;
 
@@ -94,6 +104,7 @@ export async function GET(req: NextRequest) {
         FROM usdky_snapshots
         WHERE snapshot_date BETWEEN ${start}::date AND ${end}::date
       )
+        AND (${wallet}::text IS NULL OR s.owner = ${wallet}::text)
         AND NOT EXISTS (
           SELECT 1 FROM kast_known_addresses k
           WHERE k.address = s.owner AND k.label = ANY(${exclude}::text[])

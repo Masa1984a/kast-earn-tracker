@@ -29,6 +29,13 @@ function parseDate(raw: string | null, fallback: string): string {
   return fallback;
 }
 
+function parseWallet(raw: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  return /^0x[0-9a-fA-F]{40}$/.test(trimmed) ? trimmed.toLowerCase() : trimmed;
+}
+
 function parseLimit(raw: string | null): number {
   const n = raw ? Number(raw) : DEFAULT_LIMIT;
   if (!Number.isFinite(n) || n <= 0) return DEFAULT_LIMIT;
@@ -50,6 +57,7 @@ export async function GET(req: NextRequest) {
     : parseExclude(req.nextUrl.searchParams.get('exclude'));
   const start = parseDate(req.nextUrl.searchParams.get('start_date'), DEFAULT_START);
   const end = parseDate(req.nextUrl.searchParams.get('end_date'), DEFAULT_END);
+  const wallet = parseWallet(req.nextUrl.searchParams.get('wallet'));
   const limit = parseLimit(req.nextUrl.searchParams.get('limit'));
   const db = getDb();
 
@@ -69,6 +77,7 @@ export async function GET(req: NextRequest) {
         SELECT COUNT(*)::int AS total
         FROM usdky_snapshots s
         WHERE snapshot_date = ${snapshotDate}::date
+          AND (${wallet}::text IS NULL OR s.owner = ${wallet}::text)
           AND NOT EXISTS (
             SELECT 1 FROM kast_known_addresses k
             WHERE k.address = s.owner AND k.label = ANY(${exclude}::text[])
@@ -82,6 +91,7 @@ export async function GET(req: NextRequest) {
           multiplier::text  AS multiplier
         FROM usdky_snapshots s
         WHERE snapshot_date = ${snapshotDate}::date
+          AND (${wallet}::text IS NULL OR s.owner = ${wallet}::text)
           AND NOT EXISTS (
             SELECT 1 FROM kast_known_addresses k
             WHERE k.address = s.owner AND k.label = ANY(${exclude}::text[])
@@ -125,6 +135,7 @@ export async function GET(req: NextRequest) {
           FROM gauntlet_snapshots gs
           INNER JOIN kast_base_wallets kbw ON kbw.wallet = gs.holder
           WHERE gs.snapshot_date = ${snapshotDate}::date
+            AND (${wallet}::text IS NULL OR gs.holder = ${wallet}::text)
         `,
         db`
           SELECT
@@ -135,6 +146,7 @@ export async function GET(req: NextRequest) {
           FROM gauntlet_snapshots gs
           INNER JOIN kast_base_wallets kbw ON kbw.wallet = gs.holder
           WHERE gs.snapshot_date = ${snapshotDate}::date
+            AND (${wallet}::text IS NULL OR gs.holder = ${wallet}::text)
           ORDER BY gs.usd_value DESC NULLS LAST
           LIMIT ${limit}
         `,
@@ -147,6 +159,7 @@ export async function GET(req: NextRequest) {
           SELECT COUNT(*)::int AS total
           FROM gauntlet_snapshots
           WHERE snapshot_date = ${snapshotDate}::date
+            AND (${wallet}::text IS NULL OR holder = ${wallet}::text)
         `,
         db`
           SELECT
@@ -156,6 +169,7 @@ export async function GET(req: NextRequest) {
             share_price::text AS share_price
           FROM gauntlet_snapshots
           WHERE snapshot_date = ${snapshotDate}::date
+            AND (${wallet}::text IS NULL OR holder = ${wallet}::text)
           ORDER BY gauntlet_snapshots.usd_value DESC NULLS LAST
           LIMIT ${limit}
         `,

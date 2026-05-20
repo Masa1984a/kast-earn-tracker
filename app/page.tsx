@@ -169,6 +169,7 @@ export default function Home() {
   const [kastOnly, setKastOnly] = useState<boolean>(true);
   const [startDate, setStartDate] = useState<string>(DEFAULT_START_DATE);
   const [endDate, setEndDate] = useState<string>(() => todayISO());
+  const [wallet, setWallet] = useState<string>('');
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [series, setSeries] = useState<SeriesPoint[] | null>(null);
   const [gauntletSharePrices, setGauntletSharePrices] = useState<SharePricePoint[] | null>(null);
@@ -187,9 +188,12 @@ export default function Home() {
     setLoading(true);
     setErr(null);
 
+    const trimmedWallet = wallet.trim();
+
     const dateQs = (extra?: Record<string, string>) => {
       const qs = new URLSearchParams({ start_date: startDate, end_date: endDate, ...extra });
       if (kastOnly) qs.set('kast_only', 'true');
+      if (trimmedWallet) qs.set('wallet', trimmedWallet);
       return qs;
     };
 
@@ -214,6 +218,7 @@ export default function Home() {
         limit: String(HOLDERS_LIMIT),
       });
       if (kastOnly) qs.set('kast_only', 'true');
+      if (trimmedWallet) qs.set('wallet', trimmedWallet);
       return qs;
     };
 
@@ -235,7 +240,7 @@ export default function Home() {
       })
       .catch((e: Error) => setErr(e.message))
       .finally(() => setLoading(false));
-  }, [kastOnly, service, startDate, endDate, validRange]);
+  }, [kastOnly, service, startDate, endDate, validRange, wallet]);
 
   const gauntletYield = useMemo(
     () => (gauntletSharePrices ? computeAnnualizedYield(gauntletSharePrices) : null),
@@ -326,13 +331,26 @@ export default function Home() {
               onClick={() => {
                 setStartDate(DEFAULT_START_DATE);
                 setEndDate(todayISO());
+                setWallet('');
               }}
               className="rounded border border-[#D8DEE9] px-2 py-1 text-xs text-[#4C566A] hover:bg-[#D8DEE9] dark:border-[#4C566A] dark:text-[#D8DEE9] dark:hover:bg-[#4C566A]"
-              aria-label="Reset date range to default"
+              aria-label="Reset filters to default"
             >
               Reset
             </button>
           </div>
+          <label className="flex items-center gap-1.5 text-sm">
+            <span className="text-xs text-[#4C566A] dark:text-[#D8DEE9]">Wallet</span>
+            <input
+              type="text"
+              value={wallet}
+              onChange={(e) => setWallet(e.target.value)}
+              placeholder="0x… or Solana address"
+              spellCheck={false}
+              autoComplete="off"
+              className="w-64 rounded border border-[#D8DEE9] bg-[#ECEFF4] px-2 py-1 font-mono text-xs text-[#2E3440] placeholder:text-[#9aa4b2] focus:border-[#5E81AC] focus:outline-none dark:border-[#4C566A] dark:bg-[#434C5E] dark:text-[#ECEFF4] dark:placeholder:text-[#7b8595]"
+            />
+          </label>
           {!validRange && (
             <span className="text-xs text-[#BF616A]">From must be ≤ To</span>
           )}
