@@ -772,7 +772,11 @@ function explorerUrl(explorer: 'solana' | 'base', addr: string): string {
 function formatDeltaUsd(delta: number | null): string {
   if (delta == null) return '—';
   const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
-  return `${sign}$${Math.round(Math.abs(delta)).toLocaleString()}`;
+  const abs = Math.abs(delta).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return `${sign}$${abs}`;
 }
 
 function formatDeltaPct(pct: number | null): string {
