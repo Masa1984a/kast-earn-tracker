@@ -39,6 +39,7 @@ type UsdkyRow = {
   holders: number;
   total_usd: string;
   multiplier: string;
+  snapshot_at: string | null;
 };
 
 type GauntletRow = {
@@ -46,6 +47,7 @@ type GauntletRow = {
   holders: number;
   total_usd: string;
   share_price: string;
+  snapshot_at: string | null;
 };
 
 export async function GET(req: NextRequest) {
@@ -64,7 +66,11 @@ export async function GET(req: NextRequest) {
           gs.snapshot_date::text AS snapshot_date,
           COUNT(*)::int AS holders,
           COALESCE(SUM(gs.usd_value), 0)::text AS total_usd,
-          MAX(gs.share_price)::text AS share_price
+          MAX(gs.share_price)::text AS share_price,
+          (
+            SELECT MAX(completed_at)::text FROM dune_jobs
+            WHERE job_kind = 'gauntlet_daily' AND status = 'completed' AND completed_at IS NOT NULL
+          ) AS snapshot_at
         FROM gauntlet_snapshots gs
         INNER JOIN kast_base_wallets kbw ON kbw.wallet = gs.holder
         WHERE gs.snapshot_date = (
@@ -80,7 +86,11 @@ export async function GET(req: NextRequest) {
           snapshot_date::text AS snapshot_date,
           COUNT(*)::int AS holders,
           COALESCE(SUM(usd_value), 0)::text AS total_usd,
-          MAX(share_price)::text AS share_price
+          MAX(share_price)::text AS share_price,
+          (
+            SELECT MAX(completed_at)::text FROM dune_jobs
+            WHERE job_kind = 'gauntlet_daily' AND status = 'completed' AND completed_at IS NOT NULL
+          ) AS snapshot_at
         FROM gauntlet_snapshots
         WHERE snapshot_date = (
           SELECT MAX(snapshot_date)
@@ -94,12 +104,18 @@ export async function GET(req: NextRequest) {
   const [usdkyRows, gauntletRows] = (await Promise.all([
     db`
       SELECT
-        snapshot_date::text AS snapshot_date,
+        s.snapshot_date::text AS snapshot_date,
         COUNT(*)::int AS holders,
-        COALESCE(SUM(usd_value), 0)::text AS total_usd,
-        MAX(multiplier)::text AS multiplier
+        COALESCE(SUM(s.usd_value), 0)::text AS total_usd,
+        MAX(s.multiplier)::text AS multiplier,
+        (
+          SELECT block_time::text FROM usdky_multipliers
+          WHERE effective_date <= s.snapshot_date
+          ORDER BY effective_date DESC
+          LIMIT 1
+        ) AS snapshot_at
       FROM usdky_snapshots s
-      WHERE snapshot_date = (
+      WHERE s.snapshot_date = (
         SELECT MAX(snapshot_date)
         FROM usdky_snapshots
         WHERE snapshot_date BETWEEN ${start}::date AND ${end}::date
@@ -109,16 +125,17 @@ export async function GET(req: NextRequest) {
           SELECT 1 FROM kast_known_addresses k
           WHERE k.address = s.owner AND k.label = ANY(${exclude}::text[])
         )
-      GROUP BY snapshot_date
+      GROUP BY s.snapshot_date
     `,
     gauntletPromise,
   ])) as [UsdkyRow[], GauntletRow[]];
 
   const usdky =
     usdkyRows.length === 0
-      ? { snapshot_date: null, holders: 0, total_usd: 0, multiplier: 0 }
+      ? { snapshot_date: null, snapshot_at: null, holders: 0, total_usd: 0, multiplier: 0 }
       : {
           snapshot_date: usdkyRows[0].snapshot_date,
+          snapshot_at: usdkyRows[0].snapshot_at,
           holders: usdkyRows[0].holders,
           total_usd: Number(usdkyRows[0].total_usd),
           multiplier: Number(usdkyRows[0].multiplier),
@@ -126,9 +143,10 @@ export async function GET(req: NextRequest) {
 
   const gauntlet =
     gauntletRows.length === 0
-      ? { snapshot_date: null, holders: 0, total_usd: 0, share_price: 0 }
+      ? { snapshot_date: null, snapshot_at: null, holders: 0, total_usd: 0, share_price: 0 }
       : {
           snapshot_date: gauntletRows[0].snapshot_date,
+          snapshot_at: gauntletRows[0].snapshot_at,
           holders: gauntletRows[0].holders,
           total_usd: Number(gauntletRows[0].total_usd),
           share_price: Number(gauntletRows[0].share_price),

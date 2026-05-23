@@ -75,12 +75,14 @@ type Service = 'all' | 'usdky' | 'gauntlet';
 
 interface UsdkySummary {
   snapshot_date: string | null;
+  snapshot_at: string | null;
   holders: number;
   total_usd: number;
   multiplier: number;
 }
 interface GauntletSummary {
   snapshot_date: string | null;
+  snapshot_at: string | null;
   holders: number;
   total_usd: number;
   share_price: number;
@@ -141,6 +143,19 @@ function computeAnnualizedYield(points: SharePricePoint[], days = 7): number | n
   const periodDays = (endMs - startMs) / 86_400_000;
   if (!Number.isFinite(periodDays) || periodDays <= 0) return null;
   return Math.pow(endPrice / startPrice, 365 / periodDays) - 1;
+}
+
+function formatSnapshotAt(iso: string | null, fallbackDate: string | null): string {
+  if (!iso) return fallbackDate ?? '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return fallbackDate ?? iso;
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mi = String(d.getUTCMinutes()).padStart(2, '0');
+  const ss = String(d.getUTCSeconds()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss} UTC`;
 }
 
 function fillDailyCarryForward(points: SharePricePoint[]): SharePricePoint[] {
@@ -436,7 +451,10 @@ export default function Home() {
                 title="USDKY"
                 accentBg="bg-[#5E81AC]"
                 rows={[
-                  ['Snapshot date', summary.usdky.snapshot_date ?? '—'],
+                  [
+                    'Snapshot date',
+                    formatSnapshotAt(summary.usdky.snapshot_at, summary.usdky.snapshot_date),
+                  ],
                   ['Holders', summary.usdky.holders.toLocaleString()],
                   ['Total USD', `$${Math.round(summary.usdky.total_usd).toLocaleString()}`],
                   ['Share price', summary.usdky.multiplier.toFixed(6)],
@@ -462,7 +480,13 @@ export default function Home() {
                 title="Gauntlet Alpha"
                 accentBg="bg-[#B48EAD]"
                 rows={[
-                  ['Snapshot date', summary.gauntlet.snapshot_date ?? '—'],
+                  [
+                    'Snapshot date',
+                    formatSnapshotAt(
+                      summary.gauntlet.snapshot_at,
+                      summary.gauntlet.snapshot_date,
+                    ),
+                  ],
                   ['Holders', summary.gauntlet.holders.toLocaleString()],
                   ['Total USD', `$${Math.round(summary.gauntlet.total_usd).toLocaleString()}`],
                   ['Share price', summary.gauntlet.share_price.toFixed(6)],
