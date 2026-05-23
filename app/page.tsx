@@ -208,6 +208,12 @@ const YIELD_CHART_INFO_TEXT = `For each date d, plots the annualized return over
 Formula: (price[d] / price[d-6])^(365 / actual_days) - 1
 USDKY days without an on-chain multiplier update are filled by carrying the previous day's value forward so the line stays continuous.`;
 
+const HOLDERS_INFO_TEXT = `About Prev USD / Δ USD / Δ %:
+Yield accrues in discrete events for both services, so the day-over-day delta can be $0 / 0.00% even on normal days.
+• USDKY: share_price changes only on days an on-chain multiplier-update tx fires (days without an update carry the previous value forward)
+• Gauntlet: share_price changes only on days a new vault enter event occurs (Dune derives share_price from enter events)
+A holder whose shares are unchanged and whose share_price matches the previous day will therefore show Δ = $0. This reflects the data source's behavior, not a bug.`;
+
 const DEFAULT_START_DATE = '2026-01-07';
 
 function todayISO(): string {
@@ -822,7 +828,16 @@ function HoldersTable<
       <div
         className={`${accentBg} flex items-center justify-between px-3 py-1.5 text-sm font-semibold text-white`}
       >
-        <span>{title} — holders</span>
+        <span className="flex items-center gap-1.5">
+          {title} — holders
+          <span
+            className="cursor-help text-xs font-normal opacity-90"
+            title={HOLDERS_INFO_TEXT}
+            aria-label="Prev USD / Δ delta calculation details"
+          >
+            ⓘ
+          </span>
+        </span>
         <span className="text-xs font-normal opacity-90">
           {data
             ? `Top ${Math.min(data.holders.length, HOLDERS_LIMIT)} of ${data.total.toLocaleString()}${
