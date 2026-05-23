@@ -115,12 +115,14 @@ interface UsdkyHolderRow {
   usd_value: number;
   principal: number;
   multiplier: number;
+  prev_usd_value: number | null;
 }
 interface GauntletHolderRow {
   wallet: string;
   usd_value: number;
   shares: number;
   share_price: number;
+  prev_usd_value: number | null;
 }
 interface HoldersResponse<T> {
   service: 'usdky' | 'gauntlet';
@@ -767,7 +769,28 @@ function explorerUrl(explorer: 'solana' | 'base', addr: string): string {
     : `https://basescan.org/address/${addr}`;
 }
 
-function HoldersTable<T extends { wallet: string; usd_value: number }>({
+function formatDeltaUsd(delta: number | null): string {
+  if (delta == null) return '—';
+  const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
+  return `${sign}$${Math.round(Math.abs(delta)).toLocaleString()}`;
+}
+
+function formatDeltaPct(pct: number | null): string {
+  if (pct == null || !Number.isFinite(pct)) return '—';
+  const sign = pct > 0 ? '+' : '';
+  return `${sign}${(pct * 100).toFixed(2)}%`;
+}
+
+function deltaColorClass(delta: number | null): string {
+  if (delta == null || delta === 0) return 'text-[#4C566A] dark:text-[#D8DEE9]';
+  return delta > 0
+    ? 'text-[#A3BE8C] dark:text-[#A3BE8C]'
+    : 'text-[#BF616A] dark:text-[#BF616A]';
+}
+
+function HoldersTable<
+  T extends { wallet: string; usd_value: number; prev_usd_value: number | null },
+>({
   title,
   accentBg,
   explorer,
@@ -778,6 +801,18 @@ function HoldersTable<T extends { wallet: string; usd_value: number }>({
   explorer: 'solana' | 'base';
   data: HoldersResponse<T> | null;
 }) {
+  const [copiedWallet, setCopiedWallet] = useState<string | null>(null);
+
+  const copyWallet = async (wallet: string) => {
+    try {
+      await navigator.clipboard.writeText(wallet);
+      setCopiedWallet(wallet);
+      setTimeout(() => setCopiedWallet((c) => (c === wallet ? null : c)), 1500);
+    } catch {
+      // clipboard unavailable; silently ignore
+    }
+  };
+
   return (
     <div className="overflow-hidden rounded-md border border-[#D8DEE9] bg-[#ECEFF4] shadow-sm dark:border-[#434C5E] dark:bg-[#3B4252]">
       <div
@@ -792,47 +827,103 @@ function HoldersTable<T extends { wallet: string; usd_value: number }>({
             : 'loading…'}
         </span>
       </div>
-      <div className="max-h-[420px] overflow-y-auto">
+      <div className="max-h-[420px] overflow-auto">
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-[#E5E9F0] text-[#2E3440] dark:bg-[#434C5E] dark:text-[#ECEFF4]">
             <tr>
               <th className="px-2 py-1.5 text-left font-medium">#</th>
               <th className="px-2 py-1.5 text-left font-medium">Wallet</th>
               <th className="px-2 py-1.5 text-right font-medium">USD</th>
+              <th className="px-2 py-1.5 text-right font-medium">Prev USD</th>
+              <th className="px-2 py-1.5 text-right font-medium">Δ USD</th>
+              <th className="px-2 py-1.5 text-right font-medium">Δ %</th>
             </tr>
           </thead>
           <tbody>
             {data && data.holders.length === 0 && (
               <tr>
                 <td
-                  colSpan={3}
+                  colSpan={6}
                   className="px-2 py-3 text-center text-[#4C566A] dark:text-[#D8DEE9]"
                 >
                   No holders in range
                 </td>
               </tr>
             )}
-            {data?.holders.map((h, i) => (
-              <tr
-                key={h.wallet}
-                className="border-t border-[#D8DEE9]/60 hover:bg-[#E5E9F0] dark:border-[#434C5E] dark:hover:bg-[#434C5E]"
-              >
-                <td className="px-2 py-1 text-[#4C566A] dark:text-[#D8DEE9]">{i + 1}</td>
-                <td className="px-2 py-1 font-mono">
-                  <a
-                    href={explorerUrl(explorer, h.wallet)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-[#5E81AC] hover:underline dark:text-[#88C0D0]"
-                  >
-                    {truncateAddress(h.wallet)}
-                  </a>
-                </td>
-                <td className="px-2 py-1 text-right font-mono">
-                  ${Math.round(h.usd_value).toLocaleString()}
-                </td>
-              </tr>
-            ))}
+            {data?.holders.map((h, i) => {
+              const prev = h.prev_usd_value;
+              const delta = prev == null ? null : h.usd_value - prev;
+              const pct = prev == null || prev === 0 ? null : (h.usd_value - prev) / prev;
+              const copied = copiedWallet === h.wallet;
+              return (
+                <tr
+                  key={h.wallet}
+                  className="border-t border-[#D8DEE9]/60 hover:bg-[#E5E9F0] dark:border-[#434C5E] dark:hover:bg-[#434C5E]"
+                >
+                  <td className="px-2 py-1 text-[#4C566A] dark:text-[#D8DEE9]">{i + 1}</td>
+                  <td className="px-2 py-1 font-mono">
+                    <span className="inline-flex items-center gap-1.5">
+                      <a
+                        href={explorerUrl(explorer, h.wallet)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[#5E81AC] hover:underline dark:text-[#88C0D0]"
+                      >
+                        {truncateAddress(h.wallet)}
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => copyWallet(h.wallet)}
+                        title={copied ? 'Copied!' : 'Copy full address'}
+                        aria-label="Copy wallet address"
+                        className="rounded p-0.5 text-[#4C566A] hover:bg-[#D8DEE9] hover:text-[#2E3440] dark:text-[#D8DEE9] dark:hover:bg-[#4C566A] dark:hover:text-[#ECEFF4]"
+                      >
+                        {copied ? (
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={2.5}
+                            className="h-3.5 w-3.5 text-[#A3BE8C]"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M4.5 12.75l6 6 9-13.5"
+                            />
+                          </svg>
+                        ) : (
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={1.75}
+                            className="h-3.5 w-3.5"
+                          >
+                            <rect x="9" y="9" width="11" height="11" rx="2" />
+                            <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+                          </svg>
+                        )}
+                      </button>
+                    </span>
+                  </td>
+                  <td className="px-2 py-1 text-right font-mono">
+                    ${Math.round(h.usd_value).toLocaleString()}
+                  </td>
+                  <td className="px-2 py-1 text-right font-mono text-[#4C566A] dark:text-[#D8DEE9]">
+                    {prev == null ? '—' : `$${Math.round(prev).toLocaleString()}`}
+                  </td>
+                  <td className={`px-2 py-1 text-right font-mono ${deltaColorClass(delta)}`}>
+                    {formatDeltaUsd(delta)}
+                  </td>
+                  <td className={`px-2 py-1 text-right font-mono ${deltaColorClass(delta)}`}>
+                    {formatDeltaPct(pct)}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
