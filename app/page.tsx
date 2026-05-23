@@ -129,7 +129,7 @@ interface HoldersResponse<T> {
 
 const HOLDERS_LIMIT = 100;
 
-function computeAnnualizedYield(points: SharePricePoint[], days = 30): number | null {
+function computeAnnualizedYield(points: SharePricePoint[], days = 7): number | null {
   if (points.length < 2) return null;
   const recent = points.slice(-days);
   if (recent.length < 2) return null;
@@ -374,7 +374,7 @@ export default function Home() {
                   ['Total USD', `$${Math.round(summary.usdky.total_usd).toLocaleString()}`],
                   ['Share price', summary.usdky.multiplier.toFixed(6)],
                   [
-                    'Yield (30D)',
+                    'Yield (7D)',
                     usdkyYield == null ? '—' : `${(usdkyYield * 100).toFixed(2)}%`,
                   ],
                 ]}
@@ -391,7 +391,7 @@ export default function Home() {
                   ['Total USD', `$${Math.round(summary.gauntlet.total_usd).toLocaleString()}`],
                   ['Share price', summary.gauntlet.share_price.toFixed(6)],
                   [
-                    'Yield (30D)',
+                    'Yield (7D)',
                     gauntletYield == null ? '—' : `${(gauntletYield * 100).toFixed(2)}%`,
                   ],
                 ]}

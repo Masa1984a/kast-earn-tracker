@@ -294,3 +294,9 @@
 - KAST 識別カバー率: ホルダー数で 68%、TVL ベースだと 50-60% になる可能性（retail バイアス）→ UI で「保守的下限」と明示
 - `KAST_ONRAMP` が将来変更される可能性あり。複数 onramp になったら Dune query の `WHERE first_funder IN (...)` で対応
 - `kast_base_wallets` は **insert / update only、delete なし**（時系列分析用に履歴保持）
+
+---
+
+## Phase 11: 運用上の微調整
+
+- [x] **11.1** ダッシュボード上部の Yield 算出ウィンドウを 30D → 7D に変更（KAST アプリと表記を合わせる） — `Done` (`app/page.tsx`: `computeAnnualizedYield` の `days` デフォルト 30→7、ラベル "Yield (30D)"→"Yield (7D)" を 2 箇所更新、`tsc --noEmit` 通過)
