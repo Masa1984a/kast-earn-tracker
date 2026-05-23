@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   Bar,
@@ -143,10 +143,53 @@ function computeAnnualizedYield(points: SharePricePoint[], days = 7): number | n
   return Math.pow(endPrice / startPrice, 365 / periodDays) - 1;
 }
 
+function fillDailyCarryForward(points: SharePricePoint[]): SharePricePoint[] {
+  if (points.length === 0) return [];
+  const sorted = [...points].sort((a, b) => a.date.localeCompare(b.date));
+  const byDate = new Map(sorted.map((p) => [p.date, p] as const));
+  const startMs = Date.parse(sorted[0].date);
+  const endMs = Date.parse(sorted[sorted.length - 1].date);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return sorted;
+  const out: SharePricePoint[] = [];
+  let lastPoint = sorted[0];
+  for (let t = startMs; t <= endMs; t += 86_400_000) {
+    const d = new Date(t).toISOString().slice(0, 10);
+    const hit = byDate.get(d);
+    if (hit != null) lastPoint = hit;
+    out.push({ ...lastPoint, date: d });
+  }
+  return out;
+}
+
+function computeRollingYieldSeries(
+  points: SharePricePoint[],
+  windowDays = 7,
+): { date: string; annualized_yield: number | null }[] {
+  return points.map((p, i) => {
+    if (i + 1 < windowDays) return { date: p.date, annualized_yield: null };
+    const startP = points[i + 1 - windowDays];
+    if (startP.share_price <= 0) return { date: p.date, annualized_yield: null };
+    const periodDays = (Date.parse(p.date) - Date.parse(startP.date)) / 86_400_000;
+    if (!Number.isFinite(periodDays) || periodDays <= 0) {
+      return { date: p.date, annualized_yield: null };
+    }
+    const y = Math.pow(p.share_price / startP.share_price, 365 / periodDays) - 1;
+    return { date: p.date, annualized_yield: y };
+  });
+}
+
 const KAST_INFO_TEXT = `KAST users are identified by service-specific on-chain signatures:
 • USDKY (Solana): wallets without SOL balance (KAST sponsors gas, so KAST users typically don't hold SOL)
 • Gauntlet Alpha (Base): wallets whose first USDC funding came from KAST's Bybit OTC onramp
 Coverage estimate: ~95% of USDKY holders, ~68% of Gauntlet holders.`;
+
+const YIELD_CARD_INFO_TEXT = `Yield (7D): the most recent 7 daily share_price points, annualized.
+Formula: (price[latest] / price[7 days earlier])^(365 / actual_days) - 1
+share_price source — USDKY: Token2022 scaledUiAmount multiplier. Gauntlet: vault share price from Dune.`;
+
+const YIELD_CHART_INFO_TEXT = `For each date d, plots the annualized return over the trailing 7 days ending on d.
+Formula: (price[d] / price[d-6])^(365 / actual_days) - 1
+USDKY days without an on-chain multiplier update are filled by carrying the previous day's value forward so the line stays continuous.`;
 
 const DEFAULT_START_DATE = '2026-01-07';
 
@@ -253,6 +296,30 @@ export default function Home() {
     () => (usdkySharePrices ? computeAnnualizedYield(usdkySharePrices) : null),
     [usdkySharePrices],
   );
+
+  const yieldSeries = useMemo(() => {
+    if (!usdkySharePrices && !gauntletSharePrices) return null;
+    const usdkyFilled = usdkySharePrices ? fillDailyCarryForward(usdkySharePrices) : [];
+    const gauntletFilled = gauntletSharePrices ? fillDailyCarryForward(gauntletSharePrices) : [];
+    const usdkyMap = new Map(
+      computeRollingYieldSeries(usdkyFilled).map(
+        (p) => [p.date, p.annualized_yield] as const,
+      ),
+    );
+    const gauntletMap = new Map(
+      computeRollingYieldSeries(gauntletFilled).map(
+        (p) => [p.date, p.annualized_yield] as const,
+      ),
+    );
+    const dates = new Set<string>([...usdkyMap.keys(), ...gauntletMap.keys()]);
+    return Array.from(dates)
+      .sort()
+      .map((date) => ({
+        date,
+        usdky_yield: usdkyMap.get(date) ?? null,
+        gauntlet_yield: gauntletMap.get(date) ?? null,
+      }));
+  }, [usdkySharePrices, gauntletSharePrices]);
 
   return (
     <main className="min-h-screen bg-[#ECEFF4] p-4 text-[#2E3440] sm:p-8 dark:bg-[#2E3440] dark:text-[#ECEFF4]">
@@ -374,7 +441,16 @@ export default function Home() {
                   ['Total USD', `$${Math.round(summary.usdky.total_usd).toLocaleString()}`],
                   ['Share price', summary.usdky.multiplier.toFixed(6)],
                   [
-                    'Yield (7D)',
+                    <span key="yield-label" className="inline-flex items-center gap-1">
+                      Yield (7D)
+                      <span
+                        className="cursor-help text-[10px] normal-case text-[#4C566A] dark:text-[#D8DEE9]"
+                        title={YIELD_CARD_INFO_TEXT}
+                        aria-label="Yield (7D) calculation details"
+                      >
+                        ⓘ
+                      </span>
+                    </span>,
                     usdkyYield == null ? '—' : `${(usdkyYield * 100).toFixed(2)}%`,
                   ],
                 ]}
@@ -391,7 +467,16 @@ export default function Home() {
                   ['Total USD', `$${Math.round(summary.gauntlet.total_usd).toLocaleString()}`],
                   ['Share price', summary.gauntlet.share_price.toFixed(6)],
                   [
-                    'Yield (7D)',
+                    <span key="yield-label" className="inline-flex items-center gap-1">
+                      Yield (7D)
+                      <span
+                        className="cursor-help text-[10px] normal-case text-[#4C566A] dark:text-[#D8DEE9]"
+                        title={YIELD_CARD_INFO_TEXT}
+                        aria-label="Yield (7D) calculation details"
+                      >
+                        ⓘ
+                      </span>
+                    </span>,
                     gauntletYield == null ? '—' : `${(gauntletYield * 100).toFixed(2)}%`,
                   ],
                 ]}
@@ -520,6 +605,80 @@ export default function Home() {
                 )}
               </ComposedChart>
             </ResponsiveContainer>
+          </div>
+        )}
+
+        {yieldSeries && yieldSeries.length > 0 && (
+          <div className="mt-6 rounded-md border border-[#2E3440] bg-[#ECEFF4] p-4 shadow-sm dark:border-[#ECEFF4] dark:bg-[#3B4252]">
+            <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-[#2E3440] dark:text-[#ECEFF4]">
+              7-Day Rolling Annualized Yield
+              <span
+                className="cursor-help text-xs font-normal text-[#4C566A] dark:text-[#D8DEE9]"
+                title={YIELD_CHART_INFO_TEXT}
+                aria-label="Rolling yield chart calculation details"
+              >
+                ⓘ
+              </span>
+            </h3>
+            <div className="h-[260px] sm:h-[300px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart
+                  data={yieldSeries}
+                  margin={{ top: 8, right: 16, left: 8, bottom: 8 }}
+                >
+                  <CartesianGrid stroke={NORD.snow0} strokeOpacity={0.6} vertical={false} />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fontSize: 11, fill: 'var(--foreground)' }}
+                    stroke="var(--foreground)"
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis
+                    tick={{ fontSize: 11, fill: 'var(--foreground)' }}
+                    stroke="var(--foreground)"
+                    tickFormatter={(v: number) => `${(v * 100).toFixed(1)}%`}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: NORD.snow2,
+                      border: `1px solid ${NORD.snow0}`,
+                      borderRadius: 6,
+                      color: NORD.polar0,
+                    }}
+                    labelStyle={{ color: NORD.polar0, fontWeight: 600 }}
+                    itemStyle={{ color: NORD.polar0 }}
+                    cursor={{ fill: NORD.snow0, opacity: 0.5 }}
+                    formatter={(v, name) => [
+                      v == null ? '—' : `${((v as number) * 100).toFixed(2)}%`,
+                      String(name),
+                    ]}
+                  />
+                  <Legend wrapperStyle={{ color: 'var(--foreground)', fontSize: 12 }} />
+                  {(service === 'all' || service === 'usdky') && (
+                    <Line
+                      type="monotone"
+                      dataKey="usdky_yield"
+                      stroke={HOLDERS_LINE_COLOR.usdky}
+                      strokeWidth={2}
+                      dot={false}
+                      connectNulls={false}
+                      name="USDKY"
+                    />
+                  )}
+                  {(service === 'all' || service === 'gauntlet') && (
+                    <Line
+                      type="monotone"
+                      dataKey="gauntlet_yield"
+                      stroke={HOLDERS_LINE_COLOR.gauntlet}
+                      strokeWidth={2}
+                      dot={false}
+                      connectNulls={false}
+                      name="Gauntlet"
+                    />
+                  )}
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         )}
 
@@ -665,15 +824,15 @@ function ServiceCard({
 }: {
   title: string;
   accentBg: string;
-  rows: Array<[string, string]>;
+  rows: Array<[ReactNode, string]>;
   note: string | null;
 }) {
   return (
     <div className="overflow-hidden rounded-md border border-[#D8DEE9] bg-[#ECEFF4] shadow-sm dark:border-[#434C5E] dark:bg-[#3B4252]">
       <div className={`${accentBg} px-3 py-1.5 text-sm font-semibold text-white`}>{title}</div>
       <dl className="grid grid-cols-2 gap-x-3 gap-y-2 p-3 sm:grid-cols-3">
-        {rows.map(([label, value]) => (
-          <div key={label}>
+        {rows.map(([label, value], idx) => (
+          <div key={idx}>
             <dt className="text-xs uppercase tracking-wide text-[#4C566A] dark:text-[#D8DEE9]">
               {label}
             </dt>

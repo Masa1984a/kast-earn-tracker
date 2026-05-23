@@ -300,3 +300,6 @@
 ## Phase 11: 運用上の微調整
 
 - [x] **11.1** ダッシュボード上部の Yield 算出ウィンドウを 30D → 7D に変更（KAST アプリと表記を合わせる） — `Done` (`app/page.tsx`: `computeAnnualizedYield` の `days` デフォルト 30→7、ラベル "Yield (30D)"→"Yield (7D)" を 2 箇所更新、`tsc --noEmit` 通過)
+- [ ] **11.2** メインチャート直下に「7-Day Rolling Annualized Yield」独立グラフを追加（USDKY/Gauntlet 2ライン、service フィルタ連動） — `In Progress` (`app/page.tsx`: `computeRollingYieldSeries` 追加 / `yieldSeries` useMemo 追加 / 既存 chart 直下に Y 軸 % 単一の ComposedChart を追加、`connectNulls=false` で初期 6 日は描画スキップ、`tsc --noEmit` 通過。ブラウザでの目視確認はユーザに委ねる)
+- [ ] **11.3** USDKY 側 share_price の欠損日（19/322 日、ingest が multiplier 更新検出日のみ insert する仕様に起因）対応として、フロント側で日次連続化＋前日値 carry-forward を実装 — `In Progress` (`app/page.tsx`: `fillDailyCarryForward` 追加し `yieldSeries` 構築前に両サービスの points を補完。`tsc --noEmit` 通過。`usdky_multipliers` 実データ確認: 直近欠損 04-22/04-24/04-26/05-03/05-06/05-07/05-10/05-11/05-17/05-18)
+- [ ] **11.4** 「Yield (7D)」カード行と「7-Day Rolling Annualized Yield」グラフタイトルに、KAST トグルと同じ ⓘ ホバーヘルプを追加（算出ロジックを明示） — `In Progress` (`app/page.tsx`: `YIELD_CARD_INFO_TEXT` / `YIELD_CHART_INFO_TEXT` 定数追加、`ServiceCard` の `rows` 型を `[ReactNode, string]` に広げ key を index 化、USDKY/Gauntlet カードの Yield 行ラベルとグラフタイトル隣に `title` 属性付き ⓘ span を挿入、`tsc --noEmit` 通過。ブラウザ目視はユーザに委ねる)
