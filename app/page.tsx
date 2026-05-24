@@ -9,8 +9,8 @@ type DashboardTab = 'tracker' | 'usdky-helius' | 'gauntlet-dune';
 
 const TAB_LABELS: Record<DashboardTab, string> = {
   'tracker': 'Tracker',
-  'usdky-helius': 'USDKY (Helius)',
-  'gauntlet-dune': 'Gauntlet (Dune)',
+  'usdky-helius': 'Advanced: USDKY (Helius)',
+  'gauntlet-dune': 'Advanced: Gauntlet (Dune)',
 };
 
 export default function Home() {
