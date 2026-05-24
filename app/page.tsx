@@ -2,6 +2,57 @@
 
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
+import UsdkyHeliusView from './components/UsdkyHeliusView';
+import GauntletDuneView from './components/GauntletDuneView';
+
+type DashboardTab = 'tracker' | 'usdky-helius' | 'gauntlet-dune';
+
+const TAB_LABELS: Record<DashboardTab, string> = {
+  'tracker': 'Tracker',
+  'usdky-helius': 'USDKY (Helius)',
+  'gauntlet-dune': 'Gauntlet (Dune)',
+};
+
+export default function Home() {
+  const [tab, setTab] = useState<DashboardTab>('tracker');
+  return (
+    <main className="min-h-screen bg-[#ECEFF4] p-4 text-[#2E3440] sm:p-8 dark:bg-[#2E3440] dark:text-[#ECEFF4]">
+      <div className="mx-auto max-w-6xl">
+        <header>
+          <h1 className="text-2xl font-bold sm:text-3xl">KAST Earn Tracker</h1>
+        </header>
+
+        <nav
+          role="tablist"
+          className="mt-3 flex flex-wrap gap-1 border-b border-[#D8DEE9] dark:border-[#434C5E]"
+        >
+          {(Object.keys(TAB_LABELS) as DashboardTab[]).map((t) => (
+            <button
+              key={t}
+              type="button"
+              role="tab"
+              aria-selected={tab === t}
+              onClick={() => setTab(t)}
+              className={`-mb-px rounded-t border-b-2 px-3 py-2 text-sm transition-colors ${
+                tab === t
+                  ? 'border-[#5E81AC] bg-[#ECEFF4] font-semibold text-[#2E3440] dark:bg-[#3B4252] dark:text-[#ECEFF4]'
+                  : 'border-transparent text-[#4C566A] hover:bg-[#E5E9F0] dark:text-[#D8DEE9] dark:hover:bg-[#434C5E]'
+              }`}
+            >
+              {TAB_LABELS[t]}
+            </button>
+          ))}
+        </nav>
+
+        <div className="mt-4">
+          {tab === 'tracker' && <TrackerView />}
+          {tab === 'usdky-helius' && <UsdkyHeliusView />}
+          {tab === 'gauntlet-dune' && <GauntletDuneView />}
+        </div>
+      </div>
+    </main>
+  );
+}
 import {
   Bar,
   CartesianGrid,
@@ -233,7 +284,7 @@ function formatTooltip(value: number | string, name: string): [string, string] {
   return [`$${Math.round(num).toLocaleString()}`, name];
 }
 
-export default function Home() {
+function TrackerView() {
   const [service, setService] = useState<Service>('all');
   const [kastOnly, setKastOnly] = useState<boolean>(true);
   const [startDate, setStartDate] = useState<string>(DEFAULT_START_DATE);
@@ -345,16 +396,12 @@ export default function Home() {
   }, [usdkySharePrices, gauntletSharePrices]);
 
   return (
-    <main className="min-h-screen bg-[#ECEFF4] p-4 text-[#2E3440] sm:p-8 dark:bg-[#2E3440] dark:text-[#ECEFF4]">
-      <div className="mx-auto max-w-6xl">
-        <header>
-          <h1 className="text-2xl font-bold sm:text-3xl">KAST Earn Tracker</h1>
-          <p className="mt-1 text-sm text-[#4C566A] dark:text-[#D8DEE9]">
-            Daily TVL snapshot across USDKY (Solana) and Gauntlet Alpha Vault (Base).
-          </p>
-        </header>
+    <>
+      <p className="text-sm text-[#4C566A] dark:text-[#D8DEE9]">
+        Daily TVL snapshot across USDKY (Solana) and Gauntlet Alpha Vault (Base).
+      </p>
 
-        <div className="mt-4 flex flex-wrap items-center gap-4 rounded-md border border-[#D8DEE9] bg-[#E5E9F0] p-3 shadow-sm dark:border-[#434C5E] dark:bg-[#3B4252]">
+      <div className="mt-4 flex flex-wrap items-center gap-4 rounded-md border border-[#D8DEE9] bg-[#E5E9F0] p-3 shadow-sm dark:border-[#434C5E] dark:bg-[#3B4252]">
           <div className="inline-flex overflow-hidden rounded-md border border-[#D8DEE9] dark:border-[#4C566A]">
             {(['all', 'usdky', 'gauntlet'] as const).map((s) => (
               <button
@@ -759,8 +806,7 @@ export default function Home() {
             </div>
           </div>
         </section>
-      </div>
-    </main>
+    </>
   );
 }
 
