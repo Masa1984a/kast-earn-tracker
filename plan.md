@@ -324,3 +324,16 @@
 ## Phase 13: 外部リポジトリ調査 (solana-m-extensions)
 
 - [ ] **13.1** 別 Claude Code セッションが `solana-m-extensions` リポジトリを調査するための投入用ブリーフを Markdown で作成 — `In Progress` (`solana-m-extensions-investigation.md` 作成。セクション 1-7 構成: ①コンテキスト ②USDKY オンチェーン観測事実 (302 件 update / 88% が UTC13:00 / 19 日欠損 / no-op tx 観察 / schedule shifts) ③問い A-G (A 識別 / **B update 機構** / **C yield ソース** / D authority / E 失敗モード / F multi-tenancy / G docs) ④探索 starting points と grep キーワード ⑤findings 出力フォーマット指示 (path:line 引用 / 5 行以下 quote / 300-800 lines) ⑥findings の利用方針 ⑦リポが該当しない場合のエスカレーション手順)
+
+---
+
+## Phase 14: 当日 Gauntlet=0 問題の解消
+
+> 現象: JST 午前帯 (UTC 早朝) で `/api/snapshots?service=all` を叩くと、当日 (UTC) には USDKY snapshot は既に存在するが Gauntlet snapshot は未到着 (`dune-kickoff` は UTC 23:30 実行) のため、UNION ALL の placeholder `0` がそのまま集計され、フロントの折れ線・バーが Gauntlet 側だけ $0/0 holders まで落ちる (evidence2.png)。
+> 方針: API 側で「データ未到着」と「実際の 0」を区別。UNION の placeholder を `NULL` 化し、`has_usdky` / `has_gauntlet` フラグで集計時に判定。フロント側は `connectNulls=false` の既定挙動で line が切れる + Bar は null で非描画。
+
+- [x] **14.1** `app/api/snapshots/route.ts` (service=all) の UNION SQL を NULL placeholder + has フラグ方式に書き換え — `Done` (`app/api/snapshots/route.ts`: kast_only / non-kast 両ブランチを `CASE WHEN SUM(has_usdky) > 0 THEN ... ELSE NULL END` 方式に書き換え。UNION の各 subquery に `1 AS has_usdky, 0 AS has_gauntlet` / `0, 1` フラグを追加。`ServiceRow` 型を `string | null` / `number | null` に拡張)
+- [x] **14.2** `app/page.tsx` の `ServicePoint` 型と `formatTooltip` を null 対応に拡張 — `Done` (`ServicePoint` の 4 フィールド `usdky/gauntlet/usdky_holders/gauntlet_holders` を `number | null` 化。`formatTooltip` を `value == null` の場合 `'—'` を返すように拡張。Recharts の `<Line>` は `connectNulls` 既定 false で null では line が切れ、`<Bar>` は null では描画されない既定挙動を利用)
+- [x] **14.3** `tsc --noEmit` 通過確認 + DB ライブ確認 (本日 Gauntlet=null 返却 / 昨日まで実値) — `Done` (tsc: エラーなし。DB ライブ確認: 2026-05-22..05-26 を query → 05-22/23/24/25 は usdky + gauntlet 両方実値、05-26 のみ `gauntlet:null` / `gauntlet_holders:null` / USDKY は実値 ($1,870,977 / 1,185 holders) を返却)
+- [x] **14.4** USDKY cron を UTC 00:05 → UTC 23:00 に移動 (Dune kickoff UTC 23:30 の 30 分前)、2 サービスの snapshot_at timestamp 同期 — `Done` (`vercel.json`: `"5 0 * * *"` → `"0 23 * * *"`。`getMultiplier()` + `getAllTokenAccounts()` は時刻非依存のチェーン状態 snapshot なので移動による副作用なし。移行直後の 2026-05-26 行は UTC 00:05 で既に書き込まれた値が残るので追加手当て不要、翌 UTC 日 (2026-05-27) から UTC 23:00 ベース)
+- [x] **14.5** UI `endDate` 初期値を UTC today → UTC yesterday に変更 (両サービスとも揃った日のみデフォルト表示)、reset filters ボタンの reset 先も同期 — `Done` (`app/page.tsx`: `todayISO()` → `defaultEndISO()` にリネーム + 中身を `Date.now() - 86_400_000` ベースに変更。useState 初期化 (line 295) と reset filters ボタン (line 490) の 2 箇所更新。手動で endDate=today を選択すれば 14.1-14.2 の null ハンドリングで正しく描画される (デバッグパス維持)。`tsc --noEmit` 通過)

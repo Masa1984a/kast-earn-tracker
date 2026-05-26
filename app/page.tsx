@@ -147,10 +147,10 @@ interface SummaryResponse {
 type SizePoint = { date: string; holders: number } & Partial<Record<SizeBucket, number>>;
 type ServicePoint = {
   date: string;
-  usdky: number;
-  gauntlet: number;
-  usdky_holders: number;
-  gauntlet_holders: number;
+  usdky: number | null;
+  gauntlet: number | null;
+  usdky_holders: number | null;
+  gauntlet_holders: number | null;
 };
 type SeriesPoint = SizePoint | ServicePoint;
 
@@ -267,8 +267,10 @@ A holder whose shares are unchanged and whose share_price matches the previous d
 
 const DEFAULT_START_DATE = '2026-01-07';
 
-function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+function defaultEndISO(): string {
+  // UTC yesterday: data for both USDKY and Gauntlet (Dune kickoff at UTC 23:30)
+  // is guaranteed complete only after the UTC day rollover.
+  return new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
 }
 
 function isHolderSeries(name: unknown): boolean {
@@ -276,8 +278,12 @@ function isHolderSeries(name: unknown): boolean {
   return s.includes('holders') || s.endsWith('Holders');
 }
 
-function formatTooltip(value: number | string, name: string): [string, string] {
-  const num = Number(value ?? 0);
+function formatTooltip(
+  value: number | string | null | undefined,
+  name: string,
+): [string, string] {
+  if (value == null) return ['—', name];
+  const num = Number(value);
   if (isHolderSeries(name)) {
     return [num.toLocaleString(), name];
   }
@@ -288,7 +294,7 @@ function TrackerView() {
   const [service, setService] = useState<Service>('all');
   const [kastOnly, setKastOnly] = useState<boolean>(true);
   const [startDate, setStartDate] = useState<string>(DEFAULT_START_DATE);
-  const [endDate, setEndDate] = useState<string>(() => todayISO());
+  const [endDate, setEndDate] = useState<string>(() => defaultEndISO());
   const [wallet, setWallet] = useState<string>('');
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [series, setSeries] = useState<SeriesPoint[] | null>(null);
@@ -483,7 +489,7 @@ function TrackerView() {
             type="button"
             onClick={() => {
               setStartDate(DEFAULT_START_DATE);
-              setEndDate(todayISO());
+              setEndDate(defaultEndISO());
               setWallet('');
             }}
             className="rounded border border-[#D8DEE9] px-2 py-1 text-xs text-[#4C566A] hover:bg-[#D8DEE9] dark:border-[#4C566A] dark:text-[#D8DEE9] dark:hover:bg-[#4C566A]"

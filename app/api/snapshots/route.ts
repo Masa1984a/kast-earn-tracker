@@ -28,10 +28,10 @@ type SizeRow = {
 
 type ServiceRow = {
   date: string;
-  usdky: string;
-  gauntlet: string;
-  usdky_holders: number;
-  gauntlet_holders: number;
+  usdky: string | null;
+  gauntlet: string | null;
+  usdky_holders: number | null;
+  gauntlet_holders: number | null;
 };
 
 function parseExclude(raw: string | null): string[] {
@@ -149,14 +149,15 @@ export async function GET(req: NextRequest) {
     ? ((await db`
         SELECT
           snapshot_date::text AS date,
-          COALESCE(SUM(usdky_usd), 0)::text     AS usdky,
-          COALESCE(SUM(gauntlet_usd), 0)::text  AS gauntlet,
-          COALESCE(SUM(usdky_h), 0)::int        AS usdky_holders,
-          COALESCE(SUM(gauntlet_h), 0)::int     AS gauntlet_holders
+          CASE WHEN SUM(has_usdky)    > 0 THEN COALESCE(SUM(usdky_usd), 0)::text    ELSE NULL END AS usdky,
+          CASE WHEN SUM(has_gauntlet) > 0 THEN COALESCE(SUM(gauntlet_usd), 0)::text ELSE NULL END AS gauntlet,
+          CASE WHEN SUM(has_usdky)    > 0 THEN SUM(usdky_h)::int    ELSE NULL END AS usdky_holders,
+          CASE WHEN SUM(has_gauntlet) > 0 THEN SUM(gauntlet_h)::int ELSE NULL END AS gauntlet_holders
         FROM (
           SELECT s.snapshot_date,
                  s.usd_value AS usdky_usd, 0::numeric AS gauntlet_usd,
-                 1 AS usdky_h, 0 AS gauntlet_h
+                 1 AS usdky_h, 0 AS gauntlet_h,
+                 1 AS has_usdky, 0 AS has_gauntlet
           FROM usdky_snapshots s
           WHERE s.snapshot_date BETWEEN ${start}::date AND ${end}::date
             AND (${wallet}::text IS NULL OR s.owner = ${wallet}::text)
@@ -165,7 +166,7 @@ export async function GET(req: NextRequest) {
               WHERE k.address = s.owner AND k.label = ANY(${exclude}::text[])
             )
           UNION ALL
-          SELECT gs.snapshot_date, 0::numeric, gs.usd_value, 0, 1
+          SELECT gs.snapshot_date, 0::numeric, gs.usd_value, 0, 1, 0, 1
           FROM gauntlet_snapshots gs
           INNER JOIN kast_base_wallets kbw ON kbw.wallet = gs.holder
           WHERE gs.snapshot_date BETWEEN ${start}::date AND ${end}::date
@@ -177,14 +178,15 @@ export async function GET(req: NextRequest) {
     : ((await db`
         SELECT
           snapshot_date::text AS date,
-          COALESCE(SUM(usdky_usd), 0)::text     AS usdky,
-          COALESCE(SUM(gauntlet_usd), 0)::text  AS gauntlet,
-          COALESCE(SUM(usdky_h), 0)::int        AS usdky_holders,
-          COALESCE(SUM(gauntlet_h), 0)::int     AS gauntlet_holders
+          CASE WHEN SUM(has_usdky)    > 0 THEN COALESCE(SUM(usdky_usd), 0)::text    ELSE NULL END AS usdky,
+          CASE WHEN SUM(has_gauntlet) > 0 THEN COALESCE(SUM(gauntlet_usd), 0)::text ELSE NULL END AS gauntlet,
+          CASE WHEN SUM(has_usdky)    > 0 THEN SUM(usdky_h)::int    ELSE NULL END AS usdky_holders,
+          CASE WHEN SUM(has_gauntlet) > 0 THEN SUM(gauntlet_h)::int ELSE NULL END AS gauntlet_holders
         FROM (
           SELECT s.snapshot_date,
                  s.usd_value AS usdky_usd, 0::numeric AS gauntlet_usd,
-                 1 AS usdky_h, 0 AS gauntlet_h
+                 1 AS usdky_h, 0 AS gauntlet_h,
+                 1 AS has_usdky, 0 AS has_gauntlet
           FROM usdky_snapshots s
           WHERE s.snapshot_date BETWEEN ${start}::date AND ${end}::date
             AND (${wallet}::text IS NULL OR s.owner = ${wallet}::text)
@@ -193,7 +195,7 @@ export async function GET(req: NextRequest) {
               WHERE k.address = s.owner AND k.label = ANY(${exclude}::text[])
             )
           UNION ALL
-          SELECT snapshot_date, 0::numeric, usd_value, 0, 1
+          SELECT snapshot_date, 0::numeric, usd_value, 0, 1, 0, 1
           FROM gauntlet_snapshots
           WHERE snapshot_date BETWEEN ${start}::date AND ${end}::date
             AND (${wallet}::text IS NULL OR holder = ${wallet}::text)
@@ -205,8 +207,8 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(
     rows.map((r) => ({
       date: r.date,
-      usdky: Number(r.usdky),
-      gauntlet: Number(r.gauntlet),
+      usdky: r.usdky == null ? null : Number(r.usdky),
+      gauntlet: r.gauntlet == null ? null : Number(r.gauntlet),
       usdky_holders: r.usdky_holders,
       gauntlet_holders: r.gauntlet_holders,
     })),

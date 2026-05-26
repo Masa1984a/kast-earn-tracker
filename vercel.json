@@ -1,6 +1,6 @@
 {
   "crons": [
-    { "path": "/api/cron/usdky-snapshot", "schedule": "5 0 * * *" },
+    { "path": "/api/cron/usdky-snapshot", "schedule": "0 23 * * *" },
     { "path": "/api/cron/dune-kickoff",   "schedule": "30 23 * * *" },
     { "path": "/api/cron/dune-poll",      "schedule": "*/10 * * * *" }
   ]
