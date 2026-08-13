@@ -1,7 +1,8 @@
 # USDKY Tracker - Implementation Plan
 
-最終更新: 2026-05-20
-進行状況: 44 / 47 (Phase 1-8) + Phase 9: 34/36 + Phase 10: 26/27 done（残 10.7.4 モバイル視認 / 10.8.5 翌日 cron 自然実行）
+最終更新: 2026-08-13
+進行状況: 44 / 47 (Phase 1-8) + Phase 9: 34/36 + Phase 10: 26/27 + Phase 14: 5/5 done
+現在の焦点: **Phase 15**（Gauntlet 欠損 2026-07-30..08-04 の原因調査 = 完了 / リカバリ + 再発防止 = 未着手）
 
 ---
 
@@ -337,3 +338,52 @@
 - [x] **14.3** `tsc --noEmit` 通過確認 + DB ライブ確認 (本日 Gauntlet=null 返却 / 昨日まで実値) — `Done` (tsc: エラーなし。DB ライブ確認: 2026-05-22..05-26 を query → 05-22/23/24/25 は usdky + gauntlet 両方実値、05-26 のみ `gauntlet:null` / `gauntlet_holders:null` / USDKY は実値 ($1,870,977 / 1,185 holders) を返却)
 - [x] **14.4** USDKY cron を UTC 00:05 → UTC 23:00 に移動 (Dune kickoff UTC 23:30 の 30 分前)、2 サービスの snapshot_at timestamp 同期 — `Done` (`vercel.json`: `"5 0 * * *"` → `"0 23 * * *"`。`getMultiplier()` + `getAllTokenAccounts()` は時刻非依存のチェーン状態 snapshot なので移動による副作用なし。移行直後の 2026-05-26 行は UTC 00:05 で既に書き込まれた値が残るので追加手当て不要、翌 UTC 日 (2026-05-27) から UTC 23:00 ベース)
 - [x] **14.5** UI `endDate` 初期値を UTC today → UTC yesterday に変更 (両サービスとも揃った日のみデフォルト表示)、reset filters ボタンの reset 先も同期 — `Done` (`app/page.tsx`: `todayISO()` → `defaultEndISO()` にリネーム + 中身を `Date.now() - 86_400_000` ベースに変更。useState 初期化 (line 295) と reset filters ボタン (line 490) の 2 箇所更新。手動で endDate=today を選択すれば 14.1-14.2 の null ハンドリングで正しく描画される (デバッグパス維持)。`tsc --noEmit` 通過)
+
+---
+
+## Phase 15: Gauntlet グラフ欠損 (2026-07-30 .. 08-04) の原因調査と再発防止
+
+> 現象: Gauntlet Alpha のグラフが 2026-07-30 〜 2026-08-04 の 6 日間欠落。
+> 結論: **Dune クレジット枯渇 → 課金サイクル (毎月 12 日) リセットまで Dune API が使えず、その間 kickoff が Dune 側で拒否されて `dune_jobs` に行すら作られなかった**。さらに日次 kickoff の lookback が 8 日しかないため、12 日間の停止は自己修復されず穴が残った。
+
+### 15.1 原因調査
+- [x] **15.1** 欠損原因の切り分け — `Done` (調査スクリプト 2 本を追加して Neon 実データで確定。証拠は下記「Phase 15 調査結果」参照。`scripts/diag-gauntlet-gap.ts` / `scripts/diag-dune-jobs-history.ts`)
+
+### 15.2 欠損データのリカバリ
+- [x] **15.2** 2026-07-30 .. 08-04 の 6 日ぶんを Dune backfill で埋める — `Done` (`scripts/backfill-gauntlet-range.ts` を新規作成し job #216 `gauntlet_backfill` / #217 `gauntlet_price_backfill` を kickoff → 本番 `dune-poll` cron が取り込み **snapshots 43,520 行 / price 6 行** で `completed`。検証: `gauntlet_snapshots` / `gauntlet_share_prices` ともに **全期間 434 日で欠損 0**（2025-06-05 .. 2026-08-12）。連続性も健全 — holders 7219 (07-29) → 7227 → … → 7283 → 7292 (08-05) が単調増加、share_price 1.07612 → 1.07622 … 1.07683 → 1.07712 も境界で滑らか。本番 `/api/snapshots?service=gauntlet&start_date=2026-07-28&end_date=2026-08-06` が 5 バケット全部埋まった連続データを返却)
+
+### 15.3 再発防止（クレジット消費の構造的削減）
+- [x] **15.3.3** kickoff の lookback を 7 日固定から「欠損日を見て動的に決定」へ変更 — `Done` (`app/api/cron/dune-kickoff/route.ts`: `detectGap()` + `resolveStartDate()` + `isoDaysAgo()` を追加。snapshots は `gauntlet_snapshots`、price は `gauntlet_share_prices` をそれぞれ独立に走査し `end_date - 30d .. end_date - 1d` の範囲で最古の欠損日を検出、`start_date = min(end_date - 7d, earliest_missing)` に伸長。30 日を超える欠損は `capped` フラグでレスポンスに出し手動 backfill に委ねる。レスポンスを `{windows, gaps, max_lookback_days, jobs}` に拡張。`tsc --noEmit` 通過 / `scripts/diag-kickoff-window.ts` で Neon 実データ検証 → snapshots=`2026-07-30 .. 08-13` (missing 6) / price=`2026-07-31 .. 08-13` (missing 5) を正しく算出 = 今回の欠損を自力修復できる形)
+- [ ] **15.3.1** `gauntlet_daily` の 1 回あたりコスト削減 — `Pending`（下記「クエリコスト削減の実現性」参照。**`start_date` を縮めても scan 量は減らない**構造なので、①kast_wallets を週次化 ②`start_date = end_date` にして返却行数を 8 分の 1 にする ③USDKY 同様の delta 方式へ移行 の 3 案。まず Dune UI で ② のクレジット実測が必要）
+- [ ] **15.3.2** `kickoffJob` の `executeQuery` 失敗時に `dune_jobs` へ `failed` 行を残す（現状 `route.ts` の execute が INSERT より前なので、Dune 拒否時は DB に痕跡ゼロ = 障害が見えない）— `Pending`
+- [ ] **15.3.4** 欠損検知アラート（`gauntlet_snapshots` に前日行が無ければ通知）— `Pending`
+
+### クエリコスト削減の実現性（15.3.1 の検討メモ / 2026-08-13）
+- query 7534621 は `tokens_base.transfers` を **`block_date <= end_date` の全履歴** で 2 回スキャンし、`date_series CROSS JOIN addresses` で全ホルダー × 全日のパネルを作る構造。→ **`start_date` を縮めても scan 対象は減らない**ため、「ピンポイント取得でコスト激減」は期待できない
+- 効くのは以下の 3 つ:
+  1. **kast_wallets を週次化**（5.098 credits/day → 約 0.7 相当）。母集団は 3 週間で 5,372 → 5,632 と緩慢なので日次である必要が薄い。**最も低リスクで即効**
+  2. **`start_date = end_date` にして返却行数を 58,632 → 約 7,300 に圧縮**（`/results` 取得ぶんの削減）。15.3.3 の動的 lookback があるので欠損時は自動で window が広がり、安全に縮められる。ただし 7 日重ねによる「Dune 側の遅延データ差し替え取り込み」効果は失う。**実施前に Dune UI で `start_date = end_date` の実クレジットを測り 58.4874 と比較すること**
+  3. **USDKY と同じ delta 方式へ移行**（Dune 側は `block_date = X` の transfer 差分のみ取得 → Neon 側で前日残高 + delta で日次残高を再構成）。`block_date` のパーティション枝刈りが効き scan も返却行数も桁で減る。既存 `usdky_tx_log` → snapshot 再構成と同じ設計で前例あり。ただし残高ドリフトの検証が必要なので **週次 or 月次でフル照合 (現行クエリ 1 回) を併用**する前提。工数は中〜大
+
+### Phase 15 調査結果（2026-08-13 実施）
+
+#### 確定事実（Neon 実データ）
+1. `gauntlet_snapshots` の欠損は **2026-07-30 .. 08-04 の 6 日のみ**（全 428 日中）。`gauntlet_share_prices` の欠損は **07-31 .. 08-04 の 5 日**
+2. `dune_jobs` は **2026-07-31 .. 08-11 の 12 日間、行が 1 件も作られていない**（`failed` 行すら無い = 完全な沈黙）。2026-08-12 23:30 UTC に 3 job すべて `completed` で自然復帰
+3. 07-30 は price job (#211) が `completed`、snapshot job (#212) が `Stale: exceeded 1 hour(s)` で失敗 → 07-30 だけ price あり / snapshot なしの理由
+4. **同じ沈黙が 1 サイクル前にも発生**: 2026-07-10 / 07-11 の 2 日間も `dune_jobs` 行ゼロ → **07-12 に復帰**。今回も **08-12 に復帰**。→ Dune のクレジットリセットは **毎月 12 日**（月初 1 日ではない）
+5. USDKY 側 (Helius) は 07-30 〜 08-12 まで**毎日欠損なく記録されている** → Vercel cron / デプロイは生きていた。障害は **Dune 側に限定**
+6. 7 月は復帰後も失敗が増加傾向: `gauntlet_daily` failed 6 / `kast_base_wallets_daily` failed 8 / stale 7（クレジット逼迫と整合）
+7. 1 回の取得行数が増加中: `gauntlet_daily` 49,510 行 (05-30) → 58,632 行 (08-12)
+
+#### クレジット収支（`001_クレジット分析.txt` の実測値ベース）
+- query 7534621 (snapshots) = **58.4874** / 7544316 (kast wallets) = **5.098** / 7543001 (price) = **0.0045**
+- 日次 3 本で **約 63.6 credits/day** → 31 日で約 1,970。ここに失敗・stale 実行分と `/results` 取得分が上積みされる
+- 観測されたサイクル寿命: 06-12〜07-09 で約 28 日 / **07-12〜07-30 で約 19 日**（実効消費は名目の約 2 倍ペース）→ 現行の日次 3 本は月枠に対して**恒常的にオーバー**
+
+#### 「穴が残った」構造的理由（コード）
+- `app/api/cron/dune-kickoff/route.ts:40-52`: `executeQuery()` が **INSERT より前**。Dune がクレジット超過で拒否すると throw → `Promise.all` reject → route 500 で終わり、**`dune_jobs` に記録が残らない**。DB だけ見ると「cron が動かなかった」と区別できない
+- `app/api/cron/dune-kickoff/route.ts:65-66`: 日次 window は `start_date = now - 7d` の **8 日固定**。→ 停止が 7 日以内なら翌回の window が自動で埋める（07-10/11 の 2 日停止はこれで自己修復され、データ欠損ゼロだった）が、**今回の 12 日停止は window 外に落ちて永久欠損**になった
+
+#### 未確認（DB だけでは切り分け不能）
+- 「Vercel が kickoff を叩いて Dune が 402/429 を返した」のか「Vercel が cron を発火しなかった」のかは、上記コード構造上 DB に痕跡が残らないため区別できない。確証を取るなら Vercel の該当日 Function ログ (`/api/cron/dune-kickoff`) と Dune の Billing / Credit usage 画面を突き合わせる
