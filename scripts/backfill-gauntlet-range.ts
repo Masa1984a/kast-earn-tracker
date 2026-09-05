@@ -1,7 +1,7 @@
 /**
  * 指定期間の Gauntlet データ (snapshots / price) を Dune に kickoff して
  * `dune_jobs` に executing 行を積むだけのスクリプト。
- * results の取得と ingest は本番の `dune-poll` cron (10 分毎) に任せる。
+ * results の取得と ingest は本番の `dune-poll` cron (30 分毎) に任せる。
  * → /results 取得が 1 回だけになり Dune クレジットを無駄にしない。
  *
  *   npx tsx --env-file=.env.local scripts/backfill-gauntlet-range.ts --from 2026-07-30 --to 2026-08-04
@@ -104,7 +104,7 @@ async function main() {
     console.log(`  kicked off ${kind}: job_id=${inserted[0].id} execution_id=${execution_id}`);
   }
 
-  console.log('\n本番 dune-poll cron (10 分毎) が results を取り込むまで待機してください。');
+  console.log('\n本番 dune-poll cron (30 分毎) が results を取り込むまで待機してください。');
   console.log('確認: npx tsx --env-file=.env.local scripts/diag-gauntlet-gap.ts');
 }
 

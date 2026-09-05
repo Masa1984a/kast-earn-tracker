@@ -1,8 +1,8 @@
 # USDKY Tracker - Implementation Plan
 
-最終更新: 2026-08-13
+最終更新: 2026-09-05
 進行状況: 44 / 47 (Phase 1-8) + Phase 9: 34/36 + Phase 10: 26/27 + Phase 14: 5/5 done
-現在の焦点: **Phase 15**（Gauntlet 欠損 2026-07-30..08-04 の原因調査 = 完了 / リカバリ + 再発防止 = 未着手）
+現在の焦点: **Phase 16**（Neon compute 100 CU-hour: 原因調査 = 完了 / 16.2.0 interval 緩和 = 完了・効果測定中 / 16.2.4 → 16.2.1 が次）、**Phase 15**（Gauntlet 欠損のリカバリ済 / 再発防止 3 件が残)
 
 ---
 
@@ -387,3 +387,38 @@
 
 #### 未確認（DB だけでは切り分け不能）
 - 「Vercel が kickoff を叩いて Dune が 402/429 を返した」のか「Vercel が cron を発火しなかった」のかは、上記コード構造上 DB に痕跡が残らないため区別できない。確証を取るなら Vercel の該当日 Function ログ (`/api/cron/dune-kickoff`) と Dune の Billing / Credit usage 画面を突き合わせる
+
+---
+
+## Phase 16: Neon compute 枯渇（100 CU-hour 到達）
+
+> 現象: 2026-09-05 に Neon から「project `kast-earn` が月間 100 CU-hour の 100% を消費、compute が suspend されうる」というメールを受信。
+> 結論: **`dune-poll` cron が `*/10 * * * *` = 24時間365日 10 分おきに Neon を叩いており、Neon Free の autosuspend (5 分) と噛み合って compute が常時稼働の約半分の時間起きっぱなしになっている**。Phase 15 の Dune クレジット枯渇と根は同じ「必要な時間帯を超えて回り続けるポーリング」。
+
+### 16.1 原因調査
+- [x] **16.1** Neon CU-hour 消費の原因特定 — `Done` (根拠は下記「Phase 16 調査結果」。`vercel.json` の `dune-poll` = `*/10 * * * *` / `app/api/cron/dune-poll/route.ts:26-40` が job 有無に関わらず毎回 UPDATE + SELECT を発行)
+
+### 16.2 対策
+- [x] **16.2.0** `dune-poll` の interval を緩める（`*/10` → `*/30`、24h 維持）— `Done` (`vercel.json`: `*/10 * * * *` → `*/30 * * * *`。**144 回/日 → 48 回/日**、稼働率 50% → 約 17%、poll 由来 約 90 → **約 30 CU-h/月** の見込み。あわせて `scripts/backfill-gauntlet-range.ts:4,107` の「10 分毎」表記を「30 分毎」へ更新。`npx tsc --noEmit` 通過)
+  - 実害の確認: 日次フローの有効ポーリング窓は `STALE_HOURS = 1` で決まっており **interval では変わらない**（23:30 kickoff に対し 00:00 / 00:30 の 2 回で拾い、01:00 の stale UPDATE で打ち切り。`*/10` でも打ち切りは 00:40 で同じ ~1h）。差分は ①ingest 遅延が最大 10 分 → 30 分 ②Dune API の一過性エラー時のリトライ機会が 5 回 → 1 回 の 2 点のみ
+  - 未着手の副作用: 手動 backfill（`scripts/backfill-gauntlet-range.ts` / `POST /api/admin/trigger-gauntlet-backfill`）は引き続き dune-poll 依存のまま。24h 稼働は維持したので**現時点で壊れてはいない**が、16.2.1 で窓を絞る前に 16.2.4 が必要という関係は変わらない
+- [ ] **16.2.1** `dune-poll` の schedule を kickoff 直後の窓に限定（`*/10 * * * *` → `*/10 23,0,1 * * *` 等）— `Pending`（144 回/日 → 18 回/日 = 約 87% 削減、約 11 CU-h/月。`STALE_HOURS = 1` なので日次フロー = 23:30 kickoff には 23:00-01:59 で十分。**ただし 16.2.4 が前提**）
+  - ⚠️ **前回の記載は誤り**: 「手動 backfill の取り込みは `scripts/wait-dune-jobs.ts` で代替できる」は誤。同スクリプトは `dune_jobs.status` を眺めるだけで **ingest は一切しない**（`scripts/wait-dune-jobs.ts:31-45` は SELECT のみ）。`scripts/backfill-gauntlet-range.ts` のヘッダも `app/api/admin/trigger-gauntlet-backfill/route.ts` も、明示的に「results の取得と ingest は本番の `dune-poll` cron に任せる」設計
+- [ ] **16.2.4** 手動 backfill を自己完結させる（`scripts/backfill-gauntlet-range.ts` に kickoff 後の poll + `ingestJobResults()` 呼び出しを追加、または `wait-dune-jobs.ts` を ingest 込みに拡張）— `Pending`（**16.2.1 の前提条件**。理由: `dune-poll` は stale UPDATE を SELECT より前に実行するため（`app/api/cron/dune-poll/route.ts:26-40`）、窓を夜間に絞ると昼に kickoff した backfill job は 1 時間で stale 判定され、**窓が開いた時には `failed` にされて results が捨てられる**。snapshots クエリは 1 回 58.5 credits なので Dune クレジットも無駄になる）
+- [ ] **16.2.2** `dune-poll` で stale UPDATE を SELECT の後ろに移し、`executing` が 0 件なら UPDATE を発行しない — `Pending`（クエリ数半減。ただし compute の起床自体は防げないので効果は限定的）
+- [ ] **16.2.3** 読み取り API (`/api/summary` `/api/snapshots` `/api/holders` `/api/share-prices`) の `force-dynamic` を見直し、日次更新のデータに合わせて `revalidate` / `Cache-Control` を入れる — `Pending`（現状は画面を開くたびに Neon が起床し 5 分課金される）
+
+### Phase 16 調査結果（2026-09-05 実施）
+
+#### 確定事実（コード / 設定）
+1. `vercel.json`: `dune-poll` は **`*/10 * * * *` = 1 日 144 回**。`2824495` (2026-05-20, Phase 9) で追加されて以来ずっとこの設定
+2. `app/api/cron/dune-poll/route.ts:26-40`: 認証通過後、**`executing` job の有無に関わらず** stale UPDATE と SELECT の 2 本を必ず実行する。`jobs.length === 0` の early return は SELECT の**後**にあるので、DB アクセス自体は毎回発生する
+3. 実際に job が存在するのは `dune-kickoff` (23:30 UTC) 直後のみ。`STALE_HOURS = 1` なので **1 日のうち有効なポーリングは高々 6〜12 回**、残り 130 回超は「no executing jobs」で空振りしながら compute を起こしている
+4. `lib/db.ts` は `neon()` (HTTP one-shot driver) なので常時接続は張らない。→ 常駐接続ではなく **10 分おきの起床** が原因
+
+#### CU-hour 収支の見積り
+- Neon Free の scale-to-zero は **アイドル 5 分**、最小 **0.25 CU**
+- 10 分間隔クエリ → 起床 → 5 分アイドルで suspend → 5 分停止 → 次のクエリ、の繰り返し = **稼働率 約 50%**
+- 24h × 50% = 12 compute-hour/day × 0.25 CU = **3 CU-hour/day → 30 日で約 90 CU-hour**
+- ここに `usdky-snapshot` / `dune-kickoff` の日次 2 本と、`force-dynamic` な読み取り API へのダッシュボードアクセス（1 回のアクセスごとに 5 分課金）が上積み → **100 CU-hour 到達と整合**
+- 16.2.1 適用後の試算: 18 回/日 × 5 分 = 1.5 h/day × 0.25 CU = **約 0.4 CU-hour/day → 30 日で約 11 CU-hour**（枠の約 11%）
