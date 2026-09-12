@@ -17,6 +17,13 @@ export const dynamic = 'force-dynamic';
 const DEFAULT_LOOKBACK_DAYS = 7;
 /** 欠損検知でどれだけ遡って自己修復するかの上限。これを超える欠損は scripts/backfill-gauntlet-range.ts で手動復旧 */
 const MAX_LOOKBACK_DAYS = 30;
+/**
+ * 1 回の kickoff で投げる window の上限日数。
+ * dune-poll は maxDuration = 60 秒しかなく、約 7,500 行/日 × 日数 が
+ * MAX_CRON_INGEST_ROWS (80,000) を超えると取り込めない（Phase 17 調査結果 4）。
+ * 長い欠損は「1 晩 9 日ぶんずつ」複数晩かけて自己修復させる。
+ */
+const MAX_WINDOW_DAYS = 8;
 
 type GapInfo = {
   earliest_missing: string | null;
@@ -74,13 +81,14 @@ function isoDaysAgo(endDate: string, days: number): string {
     .slice(0, 10);
 }
 
-/** 欠損があればそこまで start_date を伸ばす。無ければ通常 lookback */
+/** 欠損があればそこまで start_date を伸ばす。無ければ通常 lookback。ただし MAX_WINDOW_DAYS で頭打ち */
 function resolveStartDate(endDate: string, gap: GapInfo): string {
   const defaultStart = isoDaysAgo(endDate, DEFAULT_LOOKBACK_DAYS);
-  if (gap.earliest_missing && gap.earliest_missing < defaultStart) {
-    return gap.earliest_missing;
-  }
-  return defaultStart;
+  if (!gap.earliest_missing || gap.earliest_missing >= defaultStart) return defaultStart;
+
+  // poll が 60 秒で取り込める行数に収まるところで打ち切る（残りは翌晩以降に持ち越す）
+  const widestStart = isoDaysAgo(endDate, MAX_WINDOW_DAYS);
+  return gap.earliest_missing > widestStart ? gap.earliest_missing : widestStart;
 }
 
 type KickoffOptions = {
@@ -91,7 +99,8 @@ type KickoffOptions = {
 
 type KickoffResult =
   | { skipped: true; job_kind: string; existing: { id: number; status: string } }
-  | { skipped?: false; job_kind: string; job_id: number; execution_id: string };
+  | { skipped?: false; job_kind: string; job_id: number; execution_id: string }
+  | { failed: true; job_kind: string; job_id: number | null; error: string };
 
 async function kickoffJob(sql: NeonClient, opts: KickoffOptions): Promise<KickoffResult> {
   const existing = (await sql`
@@ -107,7 +116,30 @@ async function kickoffJob(sql: NeonClient, opts: KickoffOptions): Promise<Kickof
     return { skipped: true, job_kind: opts.job_kind, existing: existing[0] };
   }
 
-  const execution_id = await executeQuery(opts.query_id, opts.params);
+  // Dune がクレジット超過等で拒否した場合も dune_jobs に痕跡を残す。
+  // ここで throw させると行が 1 件も作られず「cron が動かなかった」と区別できない（Phase 15.3.2）
+  let execution_id: string;
+  try {
+    execution_id = await executeQuery(opts.query_id, opts.params);
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    const failed = (await sql`
+      INSERT INTO dune_jobs (query_id, params, execution_id, status, job_kind, started_at, completed_at, error_message)
+      VALUES (
+        ${opts.query_id},
+        ${JSON.stringify(opts.params)}::jsonb,
+        NULL,
+        'failed',
+        ${opts.job_kind},
+        now(),
+        now(),
+        ${`kickoff rejected: ${error}`}
+      )
+      RETURNING id
+    `.catch(() => [] as Array<{ id: number }>)) as Array<{ id: number }>;
+    return { failed: true, job_kind: opts.job_kind, job_id: failed[0]?.id ?? null, error };
+  }
+
   const inserted = (await sql`
     INSERT INTO dune_jobs (query_id, params, execution_id, status, job_kind, started_at)
     VALUES (

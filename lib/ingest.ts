@@ -39,7 +39,13 @@ export async function ingestJobResults(
 
 function dateKey(d: string | Date): string {
   if (typeof d === 'string') return d.slice(0, 10);
-  return d.toISOString().slice(0, 10);
+  // Postgres の date 列はドライバが「ローカル時刻の 0 時」として Date 化する。
+  // toISOString() で切ると UTC+9 のマシンから実行したときに 1 日前にずれるので、
+  // ローカル日付の要素から組み立てる（Vercel は UTC なので従来は表面化していなかった）。
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 async function ingestGauntletSnapshots(

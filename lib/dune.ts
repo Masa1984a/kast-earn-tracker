@@ -63,3 +63,39 @@ export async function getExecutionResults<T = Record<string, unknown>>(
   const j = (await res.json()) as { result: { rows: T[] } };
   return j.result.rows;
 }
+
+/**
+ * `/results` をページングしながら全行取得する。
+ * `getExecutionResults` は 1 リクエストで取り切る前提なので、
+ * 10 万行級の backfill（Phase 17.2）ではこちらを使う。
+ * ページを分けても取得 datapoint 数は変わらないのでクレジット消費は同じ。
+ */
+export async function getAllExecutionResults<T = Record<string, unknown>>(
+  executionId: string,
+  opts: { pageSize?: number; onPage?: (fetched: number, total: number | null) => void } = {},
+): Promise<T[]> {
+  const pageSize = opts.pageSize ?? 25_000;
+  const all: T[] = [];
+  let offset = 0;
+  let total: number | null = null;
+
+  for (;;) {
+    const url = `${DUNE_API}/execution/${executionId}/results?limit=${pageSize}&offset=${offset}`;
+    const res = await fetch(url, { headers: headers() });
+    if (!res.ok) throw new Error(`Dune results failed: ${res.status} ${await res.text()}`);
+    const j = (await res.json()) as {
+      result?: { rows?: T[]; metadata?: { total_row_count?: number } };
+      next_offset?: number;
+    };
+
+    const rows = j.result?.rows ?? [];
+    for (const r of rows) all.push(r);
+    total = j.result?.metadata?.total_row_count ?? total;
+    opts.onPage?.(all.length, total);
+
+    if (typeof j.next_offset === 'number' && rows.length > 0) offset = j.next_offset;
+    else break;
+  }
+
+  return all;
+}

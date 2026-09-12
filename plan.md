@@ -422,3 +422,85 @@
 - 24h × 50% = 12 compute-hour/day × 0.25 CU = **3 CU-hour/day → 30 日で約 90 CU-hour**
 - ここに `usdky-snapshot` / `dune-kickoff` の日次 2 本と、`force-dynamic` な読み取り API へのダッシュボードアクセス（1 回のアクセスごとに 5 分課金）が上積み → **100 CU-hour 到達と整合**
 - 16.2.1 適用後の試算: 18 回/日 × 5 分 = 1.5 h/day × 0.25 CU = **約 0.4 CU-hour/day → 30 日で約 11 CU-hour**（枠の約 11%）
+
+---
+
+## Phase 17: Gauntlet グラフ欠損の再発（2026-08-21 以降）
+
+> 現象: ダッシュボードの Gauntlet Alpha が 2026-08-21 のスナップショットで止まり、以降のバーとホルダー線が途切れている（USDKY 側は 2026-09-10 まで正常）。Phase 15 と同じ「Dune 側だけ沈黙」パターンの再発。
+> 前提: Dune のクレジットリセットは毎月 12 日（Phase 15 調査結果 4）。本日 2026-09-12 はリセット直後にあたる。
+
+### 17.1 現状把握
+- [x] **17.1** 欠損レンジと `dune_jobs` の履歴を Neon 実データで確定 — `Done` (`scripts/diag-gauntlet-gap.ts` に `--from/--to` を追加して実行。結果は下記「Phase 17 調査結果」。**欠損は 08-27..09-11 の 16 日だけでなく、08-22 / 08-26 の部分欠損と 08-24..08-26 の share_price=1 汚染を含む**)
+
+### 17.2 リカバリ
+- [x] **17.2.1** 手動 backfill を self-contained 化（= Phase 16.2.4）— `Done` (`scripts/backfill-gauntlet-range.ts` を全面改訂: kickoff → Dune 完了待ち → `getAllExecutionResults()` でページング取得 → 1 万行ずつ `ingestJobResults()` を進捗ログ付きで実行 → `dune_jobs` を completed/failed に更新、までローカルで完走する。job 行は `status='local'` で作るので `dune-poll` が二重取得しない。`--no-wait`（従来動作）/ `--execution-id`（kickoff 済み execution の取り込みのみ・クレジット消費ゼロ）/ `--kinds kast_wallets` / `--timeout-min` を追加。`lib/dune.ts` に `getAllExecutionResults()` を追加。`npx tsc --noEmit` 通過 / lint 追加エラーなし)
+- [x] **17.2.2** snapshots 2026-08-22 .. 09-11 を再取得して埋め直す — `Done` (execution `01M2AR7TE04ZK9YTCTR0ZWDZ1Z` は 6.5 分で完了し 160,326 行を取得。1 回目の ingest は Neon 満杯で全滅（Phase 18）→ 容量回収後に `--execution-id` で **再実行なし = 追加クレジットゼロ**で取り込み直し、job #259 で 160,326 行 completed)
+- [x] **17.2.3** `kast_base_wallets` を再取得 — `Done` (job #258 / 5,999 行。08-23 時点の 5,758 件から +241 件)
+- [x] **17.2.5** ingest の日付ずれバグ修正 — `Done` (`lib/ingest.ts:dateKey()` が Postgres の `date` 列を `toISOString()` で切っていたため、**JST のローカル実行だと 1 日前にずれる**（Vercel は UTC なので今まで表面化しなかった）。結果 priceMap のキーが 1 日ずれ、チャンク末尾の日は price が引けず `1.0` にフォールバックして TVL が 48M / 52M で振動した。ローカル日付要素から組み立てる形に修正 + `scripts/repair-gauntlet-prices.ts` を新規作成して `gauntlet_share_prices` から `share_price` / `usd_value` を再突合（160,326 行、Dune 非使用）)
+- [x] **17.2.4** リカバリ後の検証 — `Done` (`gauntlet_snapshots` = 2025-06-05 .. 2026-09-11 の **464 日で欠損 0** / 1,457,522 行。holders 7,479 (08-21) → 7,489 → … → 7,784 (09-11) と単調増加、TVL も 52.67M → 52.59M → … → 51.11M と滑らか、全 21 日で `share_price` が `gauntlet_share_prices` と一致。画面が使う KAST filter 経路（`INNER JOIN kast_base_wallets`）も 5,697 → 5,927 holders で連続（`scripts/diag-gauntlet-gap.ts` に「8b. KAST filter 経路」を追加して検証）。残る欠損は 09-12 のみ = 今夜 23:30 UTC の cron 待ち)
+- [ ] **17.2.6** `usdky_snapshots` の 2026-09-11 欠損 — `Blocked`（Neon 満杯で当日の cron が書けなかったぶん。USDKY の日次 cron は Helius から**その時点の**全 token account を読む方式なので、後追いでは復元できない。`usdky_tx_log` は 2026-05-19 で止まっており（初回 backfill のまま日次更新していない）、tx から再構成するには `scripts/backfill.ts` の全期間 backfill = Helius クレジットと追加のディスク容量が要る。1 日の穴を埋めるためにやるかはユーザー判断）
+
+### 17.3 再発防止（コードは適用済 / デプロイは未）
+- [x] **17.3.1** `dune-poll` の stale UPDATE を SELECT の後ろへ移動 + `STALE_HOURS` 1 → 2（= Phase 16.2.2 も同時に解消）— `Done` (`app/api/cron/dune-poll/route.ts`: 「拾う前に殺す」順序を解消し、`executing` が 0 件なら UPDATE を発行しない形になった)
+- [x] **17.3.2** `dune-poll` に取り込みサイズのガードを追加 — `Done` (`MAX_CRON_INGEST_ROWS = 80_000`。`getExecutionStatus` の `result_metadata.total_row_count` を見て超過なら **部分 ingest せず** `failed` にし、`--execution-id ...` での手動復旧コマンドを `error_message` に残す。08-22 / 08-26 のような部分欠損を作らない)
+- [x] **17.3.3** `dune-kickoff` の window を `MAX_WINDOW_DAYS = 8`（= 9 日ぶん）で頭打ちに — `Done` (`resolveStartDate()`。30 日の欠損に対して 30 日 window を投げても poll が取り込めず全損するので、1 晩 9 日ずつ複数晩かけて自己修復させる)
+- [x] **17.3.4** kickoff 拒否時に `dune_jobs` へ `failed` 行を残す（= Phase 15.3.2）— `Done` (`kickoffJob()` の `executeQuery` を try/catch し `kickoff rejected: ...` を記録。08-24..09-09 の「行ゼロの 17 日間」が今後は DB から見える)
+- [x] **17.3.5** `vercel.json` の `dune-poll` を夜間窓に限定（= Phase 16.2.1）— `Done` (`*/30 * * * *` → `*/10 23,0,1,2 * * *`。48 回/日 → 24 回/日 で Neon CU も削減、かつ 23:30 kickoff に対し 10 分刻み × `STALE_HOURS=2` で実効窓 30 分 → 120 分に回復。16.2.1 の前提だった 16.2.4 は 17.2.1 で完了済)
+- [ ] **17.3.6** 欠損検知アラート（= Phase 15.3.4）— `Pending`（`gauntlet_snapshots` に前日行が無い / `dune_jobs` に failed がある場合に通知。現状は画面を見るまで気づけない）
+- [ ] **17.3.7** `POST /api/admin/trigger-gauntlet-backfill` は依然 `dune-poll` 依存 — `Pending`（17.3.5 で poll が夜間のみになったため、昼に叩くと最大 数時間 待たされる。手動復旧は `scripts/backfill-gauntlet-range.ts` を正とし、admin route は将来 `status='local'` + 自前 ingest へ寄せるか撤去する）
+
+### Phase 17 調査結果（2026-09-12 実施）
+
+`npx tsx --env-file=.env.local scripts/diag-gauntlet-gap.ts --from 2026-08-15 --to 2026-09-12` の実データより:
+
+1. **`gauntlet_share_prices` は 09-11 まで欠損 0**（09-12 は当日ぶんで未取得なので正常）。壊れているのは `gauntlet_snapshots` だけ
+2. `gauntlet_snapshots` の実際の被害は 3 種類:
+   - **完全欠損 16 日**: 2026-08-27 .. 09-11
+   - **部分欠損 2 日**: 08-22 = 2,913 holders / 08-26 = 4,963 holders（正常日は約 7,500）
+   - **share_price 汚染 3 日**: 08-24 / 08-25 / 08-26 が `share_price = 1`（`ingestGauntletSnapshots` は price 行が無い日を `1.0` で埋める）→ tvl が 52M ではなく 48M で記録
+3. `dune_jobs` の履歴:
+   - 08-22 / 08-23 の `gauntlet_daily` が `Stale: exceeded 1 hour(s)` で failed（08-23 は kast wallets も `QUERY_STATE_FAILED`）
+   - **08-24 .. 09-09 の 17 日間は行が 1 件も無い** = Phase 15 と同じ「Dune が kickoff を拒否 → `executeQuery` が throw → INSERT に到達せず痕跡ゼロ」（15.3.2 が未着手のため再発）
+   - 09-10 / 09-11 は 3 job とも行が作られたが**全部 stale で failed**、`rows_count` は null
+4. **`dune-poll` の 60 秒制約が部分欠損の主因**: `maxDuration = 60` の中で job を逐次処理し、`getExecutionResults()` で 15 万行級を取得 → `ingestJobResults()` が 500 行ずつ Neon に往復する。途中で関数が殺されると **行だけ部分コミットされ、`dune_jobs` は `executing` のまま**残る（08-26 が 4,963 行で止まっているのがその痕跡）。09-10 の job #251 は window 08-23..09-10 = 約 13 万行で、これが 08-24..08-26 を書いた
+5. **`*/30` 化（16.2.0）で stale の実効窓が半減した**: kickoff 23:30 に対しポーリングは 00:00 と 00:30 の 2 回だけ。00:30 の実行では stale UPDATE が SELECT より先に走り、`started_at + 1h` を 9 秒超過して **拾う前に failed に落とす**。`*/10` 時代は 00:30 の回で間に合っていた（実効窓 60 分 → 30 分）。09-10 / 09-11 の全 job が stale なのはこれと整合。→ plan 16.2.0 に書いた「差分は ingest 遅延とリトライ回数だけ」は**誤り**
+6. Dune のクレジット復帰は 09-10（kickoff が受理され始めた日）。plan 15 の「毎月 12 日リセット」は 09 月では成り立っていない
+
+
+---
+
+## Phase 18: Neon ストレージ 512 MB 上限到達（Phase 17 リカバリの真のブロッカー）
+
+> 現象: Phase 17 のリカバリ ingest が `NeonDbError: could not extend file because project size limit (512 MB) has been exceeded` (SQLSTATE 53100) で失敗。
+> 結論: **Neon Free の 512 MB を使い切って DB が書き込み不能になっていた**。Gauntlet が Dune 都合で止まっていたのとは別に、**USDKY 側も 2026-09-11 以降スナップショットが取れていない**（`usdky_snapshots` の最終日が 09-10）のはこれが理由。つまり画面の「Gauntlet が途切れている」は Dune クレジット枯渇 + poll の 60 秒制約 + **DB 満杯** の 3 段重ね。
+
+### 18.1 現状把握
+- [x] **18.1** ストレージ内訳の計測 — `Done` (`scripts/diag-neon-size.ts` を新規作成。計測時 **490 MB / 512 MB (95.6%)**。内訳は下記)
+
+### 18.2 即時の容量回収（データ削除なし）
+- [x] **18.2.1** 冗長インデックスの削除 — `Done` (`migrations/006_reclaim_space.sql`: `idx_gauntlet_date` (48 MB) は PK `(snapshot_date, holder)` の先頭列と重複で完全に冗長。ほか `idx_kast_wallets_funded` (idx_scan=0) / `idx_tx_log_time` (idx_scan=2) も削除。復元 SQL はコメントに明記)
+- [x] **18.2.2** VACUUM で dead tuple を回収可能にする — `Done` (`scripts/diag-neon-size.ts --vacuum`。`gauntlet_snapshots` に dead 232,839 行が滞留していた = 最終 autovacuum が 08-21。**VACUUM FULL は使わない**（一時的に倍の容量が要るため上限到達時に走らせてはいけない）)
+- 結果: **490 MB → 441 MB**（空き 71 MB + heap 内に再利用可能な約 30 MB）
+- リカバリ完了後の実測: **457 MB / 512 MB (89%)**。空き 55 MB / 増加ペース 約 2.5 MB/日 → **残り約 3 週間**
+
+### 18.3 構造対策（未決定・ユーザー判断が必要）
+- [ ] **18.3** 増加ペースへの恒久対策 — `Pending`
+  - 現状 `gauntlet_snapshots` は **368 MB / 1,327,608 行**（heap 196 MB + index 172 MB）で、**1 日あたり約 7,600 行 ≒ 2.5 MB**（heap + PK index + holder index）。**約 75 MB/月**で増える
+  - つまり今回の回収分だけでは **2〜3 週間でまた上限**に当たる
+  - 候補:
+    1. **明細の保持期間 + 日次集計テーブルへのロールアップ** — グラフが必要とするのは日次の 5 バケット合計と holders 数だけ。明細は直近 N 日だけ残す。約 270 MB を空けられ、増加も頭打ちにできる。代償: ウォレット個別検索が N 日より前を返せなくなる
+    2. **Neon プランのアップグレード** — コード変更ゼロ / 有料
+    3. **行あたりのサイズ削減**（`holder` を text(42) → bytea(20)、`chain` 列の削除）— 3〜4 割減。増加ペース自体は変わらない
+
+### Phase 18 調査結果（2026-09-12 実施）
+
+| テーブル | total | heap | index | rows |
+|---|---|---|---|---|
+| `gauntlet_snapshots` | 416 MB → 368 MB | 196 MB | 220 MB → 172 MB | 1,327,608 |
+| `usdky_snapshots` | 60 MB | 29 MB | 31 MB | 264,658 |
+| その他合計 | 約 6 MB | | | |
+
+- **index が heap より大きい**のが特徴。`gauntlet_snapshots_pkey` だけで 157 MB（`(date, text(42))` の複合 PK）
+- `idx_gauntlet_date` は 48 MB を使いながら PK の先頭列と完全に重複していた（scans 7,944 はすべて PK で代替可能）
+- 認証系の残骸テーブル（`user` / `session` / `account` / `organization` 等）も存在するが合計 8 KB 程度で無害

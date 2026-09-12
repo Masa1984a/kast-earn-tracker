@@ -1,13 +1,42 @@
 /**
- * 調査用: Gauntlet Alpha のグラフ欠損 (2026-07-30 .. 2026-08-04) の原因切り分け
+ * 調査用: Gauntlet Alpha のグラフ欠損の原因切り分け
  *
  *   npx tsx --env-file=.env.local scripts/diag-gauntlet-gap.ts
+ *   npx tsx --env-file=.env.local scripts/diag-gauntlet-gap.ts --from 2026-08-15 --to 2026-09-12
+ *
+ * --from / --to を省略した場合は「直近 30 日」を見る。
  */
-import { exit } from 'node:process';
+import { argv, exit } from 'node:process';
 import { getDb } from '../lib/db';
 
-const FROM = '2026-07-20';
-const TO = '2026-08-13';
+function isoDaysAgo(days: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+function parseArgs(): { from: string; to: string } {
+  let from = isoDaysAgo(30);
+  let to = isoDaysAgo(0);
+  for (let i = 2; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--from') from = argv[++i];
+    else if (a === '--to') to = argv[++i];
+    else {
+      console.error(`unknown argument: ${a}`);
+      exit(1);
+    }
+  }
+  for (const [k, v] of [['--from', from], ['--to', to]] as const) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+      console.error(`invalid ${k}: ${v} (YYYY-MM-DD)`);
+      exit(1);
+    }
+  }
+  return { from, to };
+}
+
+const { from: FROM, to: TO } = parseArgs();
 
 async function main() {
   const sql = getDb({ unpooled: true });
@@ -121,6 +150,20 @@ async function main() {
     ORDER BY d
   `) as Array<{ d: string }>;
   console.log(`  ${gaps.length} 日欠損: ${gaps.map((g) => g.d).join(', ') || '(なし)'}`);
+
+  console.log(`
+=== 8b. KAST filter 経路（画面が実際に使う INNER JOIN kast_base_wallets）===`);
+  const kast = (await sql`
+    SELECT gs.snapshot_date::text AS d,
+           COUNT(*)::int AS kast_holders,
+           ROUND(SUM(gs.usd_value)::numeric, 0)::text AS kast_tvl
+    FROM gauntlet_snapshots gs
+    INNER JOIN kast_base_wallets kbw ON kbw.wallet = gs.holder
+    WHERE gs.snapshot_date BETWEEN ${FROM}::date AND ${TO}::date
+    GROUP BY gs.snapshot_date
+    ORDER BY gs.snapshot_date
+  `) as Array<Record<string, string>>;
+  for (const r of kast) console.log(`  ${r.d}: kast_holders=${r.kast_holders} kast_tvl=${r.kast_tvl}`);
 
   console.log(`\n=== 8. gauntlet_share_prices 欠損日 全期間リスト ===`);
   const priceGaps = (await sql`
