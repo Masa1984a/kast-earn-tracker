@@ -1,4 +1,5 @@
 import type { NeonClient } from './db';
+import { refreshGauntletRollup } from './rollup';
 
 type SnapshotRow = {
   snapshot_date: string;
@@ -91,6 +92,9 @@ async function ingestGauntletSnapshots(
     total += batch.length;
   }
 
+  // 明細を書いたら同じ日の集計も作り直す（Phase 19: グラフはこの集計だけを読む）
+  await refreshGauntletRollup(sql, uniqueDates);
+
   return { inserted: total };
 }
 
@@ -131,6 +135,9 @@ async function ingestGauntletPrices(
       AND (gs.share_price IS DISTINCT FROM gp.share_price
            OR gs.usd_value IS DISTINCT FROM gs.shares * gp.share_price)
   `;
+
+  // share_price の更新は usd_value を動かすので集計も追随させる
+  await refreshGauntletRollup(sql, dates);
 
   return { inserted: rows.length };
 }

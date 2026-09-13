@@ -110,6 +110,26 @@ export async function GET(req: NextRequest) {
   }
 
   if (service === 'gauntlet') {
+    // Phase 19: ウォレット指定が無いときは日次集計テーブルを読む。
+    // 明細 (gauntlet_snapshots) は保持期間の外が消えるので、全期間を描けるのは集計側だけ
+    if (!wallet) {
+      const rows = (await db`
+        SELECT
+          snapshot_date::text   AS date,
+          whale_100k_plus::text AS "whale_100k+",
+          large_10k_100k::text  AS "large_10k_100k",
+          mid_1k_10k::text      AS "mid_1k_10k",
+          retail_100_1k::text   AS "retail_100_1k",
+          dust_lt_100::text     AS "dust_lt_100",
+          holders
+        FROM gauntlet_daily_rollup
+        WHERE scope = ${kastOnly ? 'kast' : 'all'}
+          AND snapshot_date BETWEEN ${start}::date AND ${end}::date
+        ORDER BY snapshot_date
+      `) as SizeRow[];
+      return NextResponse.json(shapeSizeRows(rows));
+    }
+
     const rows = kastOnly
       ? ((await db`
           SELECT
@@ -145,7 +165,36 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(shapeSizeRows(rows));
   }
 
-  const rows = kastOnly
+  const rows = !wallet
+    ? ((await db`
+        SELECT
+          snapshot_date::text AS date,
+          CASE WHEN SUM(has_usdky)    > 0 THEN COALESCE(SUM(usdky_usd), 0)::text    ELSE NULL END AS usdky,
+          CASE WHEN SUM(has_gauntlet) > 0 THEN COALESCE(SUM(gauntlet_usd), 0)::text ELSE NULL END AS gauntlet,
+          CASE WHEN SUM(has_usdky)    > 0 THEN SUM(usdky_h)::int    ELSE NULL END AS usdky_holders,
+          CASE WHEN SUM(has_gauntlet) > 0 THEN SUM(gauntlet_h)::int ELSE NULL END AS gauntlet_holders
+        FROM (
+          SELECT s.snapshot_date,
+                 s.usd_value AS usdky_usd, 0::numeric AS gauntlet_usd,
+                 1 AS usdky_h, 0 AS gauntlet_h,
+                 1 AS has_usdky, 0 AS has_gauntlet
+          FROM usdky_snapshots s
+          WHERE s.snapshot_date BETWEEN ${start}::date AND ${end}::date
+            AND NOT EXISTS (
+              SELECT 1 FROM kast_known_addresses k
+              WHERE k.address = s.owner AND k.label = ANY(${exclude}::text[])
+            )
+          UNION ALL
+          -- Phase 19: gauntlet 側は日次集計テーブル（保持期間の外も描ける）
+          SELECT r.snapshot_date, 0::numeric, r.total_usd, 0, r.holders, 0, 1
+          FROM gauntlet_daily_rollup r
+          WHERE r.scope = ${kastOnly ? 'kast' : 'all'}
+            AND r.snapshot_date BETWEEN ${start}::date AND ${end}::date
+        ) t
+        GROUP BY snapshot_date
+        ORDER BY snapshot_date
+      `) as ServiceRow[])
+    : kastOnly
     ? ((await db`
         SELECT
           snapshot_date::text AS date,

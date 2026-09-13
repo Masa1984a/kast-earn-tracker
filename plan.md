@@ -485,7 +485,7 @@
 - リカバリ完了後の実測: **457 MB / 512 MB (89%)**。空き 55 MB / 増加ペース 約 2.5 MB/日 → **残り約 3 週間**
 
 ### 18.3 構造対策（未決定・ユーザー判断が必要）
-- [ ] **18.3** 増加ペースへの恒久対策 — `Pending`
+- [x] **18.3** 増加ペースへの恒久対策 — `Done`（方針決定: 「保持期間 + 日次集計」を採用 → 実装は Phase 19）
   - 現状 `gauntlet_snapshots` は **368 MB / 1,327,608 行**（heap 196 MB + index 172 MB）で、**1 日あたり約 7,600 行 ≒ 2.5 MB**（heap + PK index + holder index）。**約 75 MB/月**で増える
   - つまり今回の回収分だけでは **2〜3 週間でまた上限**に当たる
   - 候補:
@@ -504,3 +504,41 @@
 - **index が heap より大きい**のが特徴。`gauntlet_snapshots_pkey` だけで 157 MB（`(date, text(42))` の複合 PK）
 - `idx_gauntlet_date` は 48 MB を使いながら PK の先頭列と完全に重複していた（scans 7,944 はすべて PK で代替可能）
 - 認証系の残骸テーブル（`user` / `session` / `account` / `organization` 等）も存在するが合計 8 KB 程度で無害
+
+
+---
+
+## Phase 19: Gauntlet 明細の保持期間 + 日次集計（Phase 18.3 の実装）
+
+> 方針: グラフ / サマリが必要とするのは「日 × スコープ」の集計値だけ。集計を永続化しておけば、
+> ホルダー明細 (`gauntlet_snapshots`) を保持期間で削っても全期間の推移を描ける。
+> 明細が要るのは ①個別ウォレット検索 ②`/api/holders`（最新日と前日）の 2 つだけ。
+
+### 19.1 集計テーブル
+- [x] **19.1.1** `gauntlet_daily_rollup` を作成 — `Done` (`migrations/007_gauntlet_daily_rollup.sql`。PK `(snapshot_date, scope)` / `scope` は `'all'` \| `'kast'` の CHECK 付き。holders / total_usd / 5 バケット / share_price を保持)
+- [x] **19.1.2** `lib/rollup.ts:refreshGauntletRollup()` — `Done`（指定日を明細から丸ごと再計算する冪等処理。ingest の途中で何度呼んでも最終値は同じ）
+- [x] **19.1.3** ingest への組み込み — `Done` (`lib/ingest.ts`: snapshots ingest 後と price ingest 後（`usd_value` が動くため）に集計を作り直す)
+- [x] **19.1.4** 全期間の集計を生成 — `Done` (`scripts/backfill-gauntlet-rollup.ts` で 464 日 → **712 行**（`all` 464 + `kast` 248。初期の 216 日は KAST ウォレットが 1 件も居ないので `kast` 行は作られない）。`--verify` で明細との holders / total_usd 一致を確認)
+
+### 19.2 読み取り側の切り替え
+- [x] **19.2.1** `/api/snapshots` を集計テーブル経由に — `Done`（`service=gauntlet` のバケット集計と複合クエリの gauntlet 側。**ウォレット指定があるときだけ明細を読む**）
+- [x] **19.2.2** `/api/summary` を集計テーブル経由に — `Done`（あわせて `snapshot_at` の集計元を `job_kind = 'gauntlet_daily'` → `IN ('gauntlet_daily', 'gauntlet_backfill')` に変更。手動リカバリも「最終取得日時」に反映される）
+- [x] **19.2.3** 実 API での検証 — `Done`（`npm run dev` + curl。kast_only の holders 5,903 / 5,913 / 5,927、TVL 3,466,106 / 3,331,507 / 2,848,862 が明細直読みの値と完全一致）
+
+### 19.3 明細のパージ（**デプロイ後でないと実行してはいけない**）
+- [ ] **19.3.1** `scripts/purge-gauntlet-detail.ts` で古い明細を削除 — `Blocked`
+  - ⚠️ **順序の制約**: 本番にデプロイされている読み取り API はまだ明細を直読みしている。**19.2 をデプロイする前にパージすると、本番のグラフから過去分が消える**
+  - dry-run 実測（`--keep-days 90`）: 削除対象 **373 日 / 802,936 行**（明細の 55%）
+  - 安全策は実装済: 集計行が無い日は消さない / `--yes` が無いと消さない / 1 日ずつ削除して 30 日ごとに VACUUM
+  - 削除しても Neon の使用量はすぐには減らない（空きページとして再利用される）。**増加を止めるのが目的**
+- [ ] **19.3.2** パージの自動化 — `Pending`（日次 cron に「保持期間より古い 1 日を消す」を足せば横ばいを維持できる。19.3.1 を手動で回してから）
+
+### 19.4 既知の挙動変更
+- `kast` スコープの集計は**集計した時点の `kast_base_wallets`** で確定する。従来は読むたびに INNER JOIN していたので、KAST ウォレットが新しく見つかると過去日の数字も後から増えていた。今後は ingest で触れた日（直近 8 日程度）だけ追随し、それより古い日は固定される
+- ウォレット個別検索の Gauntlet 履歴は、パージ後は保持期間より前を返さなくなる（UI に注記を出すかは未対応）
+
+### Phase 19 メモ: 2026-09-12 夜の cron（未デプロイ状態での実測）
+- `#260 gauntlet_daily` / `#261 kast_base_wallets_daily` が **また `Stale: exceeded 1 hour(s)` で失敗**（09-12 分の Gauntlet 明細が欠測）
+- `#262 gauntlet_price` だけ 16 秒で完了したので成功
+- → Phase 17.3 の修正（stale 窓 30 分 → 120 分、poll 順序、`*/10 23,0,1,2`）が**デプロイされるまで毎晩同じ失敗が続き、1 回あたり 58.5 credits を捨て続ける**
+- デプロイすれば `dune-kickoff` の動的 lookback（最大 9 日）が 09-12 の欠損を翌晩に自動で埋める。手動 backfill でクレジットを使う必要はない

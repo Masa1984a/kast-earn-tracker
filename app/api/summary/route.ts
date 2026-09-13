@@ -60,7 +60,29 @@ export async function GET(req: NextRequest) {
   const wallet = parseWallet(req.nextUrl.searchParams.get('wallet'));
   const db = getDb();
 
-  const gauntletPromise = kastOnly
+  // Phase 19: ウォレット指定が無いときは日次集計テーブルを読む
+  // （明細 gauntlet_snapshots は保持期間の外が消えるため）
+  const gauntletPromise = !wallet
+    ? db`
+        SELECT
+          r.snapshot_date::text AS snapshot_date,
+          r.holders,
+          r.total_usd::text AS total_usd,
+          r.share_price::text AS share_price,
+          (
+            SELECT MAX(completed_at)::text FROM dune_jobs
+            WHERE job_kind IN ('gauntlet_daily', 'gauntlet_backfill')
+              AND status = 'completed' AND completed_at IS NOT NULL
+          ) AS snapshot_at
+        FROM gauntlet_daily_rollup r
+        WHERE r.scope = ${kastOnly ? 'kast' : 'all'}
+          AND r.snapshot_date = (
+            SELECT MAX(snapshot_date) FROM gauntlet_daily_rollup
+            WHERE scope = ${kastOnly ? 'kast' : 'all'}
+              AND snapshot_date BETWEEN ${start}::date AND ${end}::date
+          )
+      `
+    : kastOnly
     ? db`
         SELECT
           gs.snapshot_date::text AS snapshot_date,
@@ -69,7 +91,8 @@ export async function GET(req: NextRequest) {
           MAX(gs.share_price)::text AS share_price,
           (
             SELECT MAX(completed_at)::text FROM dune_jobs
-            WHERE job_kind = 'gauntlet_daily' AND status = 'completed' AND completed_at IS NOT NULL
+            WHERE job_kind IN ('gauntlet_daily', 'gauntlet_backfill')
+              AND status = 'completed' AND completed_at IS NOT NULL
           ) AS snapshot_at
         FROM gauntlet_snapshots gs
         INNER JOIN kast_base_wallets kbw ON kbw.wallet = gs.holder
@@ -89,7 +112,8 @@ export async function GET(req: NextRequest) {
           MAX(share_price)::text AS share_price,
           (
             SELECT MAX(completed_at)::text FROM dune_jobs
-            WHERE job_kind = 'gauntlet_daily' AND status = 'completed' AND completed_at IS NOT NULL
+            WHERE job_kind IN ('gauntlet_daily', 'gauntlet_backfill')
+              AND status = 'completed' AND completed_at IS NOT NULL
           ) AS snapshot_at
         FROM gauntlet_snapshots
         WHERE snapshot_date = (
