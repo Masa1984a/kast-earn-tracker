@@ -593,7 +593,7 @@
 - [x] **21.3.4** 滞留している `executing` job の後始末 — `Done`（`scripts/fix-stuck-dune-jobs.ts` を新規作成。3 時間以上 `executing` の job を一覧し `--yes` で failed に落とす。#264/#265/#266 を処理済み。execution_id は残るので後から `--execution-id` で再取り込みできる）
 
 ### 21.4 恒久対策
-- [x] **21.4.1** 明細パージの実行（保持 90 日）— `Done`（ユーザー判断で 90 日。**1,466,549 行 → 651,307 行 / 91 日**。途中 1 回目は VACUUM の FSM 拡張が容量上限で弾かれて 180 日目で停止したため、`migrations/008_reclaim_space.sql` で `idx_gauntlet_holder` (17 MB) と `idx_snapshots_date` (2 MB) を削除して 490 → 470 MB にしてから再開した。**インデックスの DROP はファイルを消すので pg_database_size が即減る。DELETE / VACUUM では減らない**のがポイント）
+- [x] **21.4.1** 明細パージの実行（保持 90 日）— `Done`（ユーザー判断で 90 日。**1,466,549 行 → 651,307 行 / 91 日**。途中 1 回目は VACUUM の FSM 拡張が容量上限で弾かれて 180 日目で停止したため、`migrations/008_drop_gauntlet_holder_index.sql` で `idx_gauntlet_holder` (17 MB) と `idx_snapshots_date` (2 MB) を削除して 490 → 470 MB にしてから再開した。**インデックスの DROP はファイルを消すので pg_database_size が即減る。DELETE / VACUUM では減らない**のがポイント）
 - [x] **21.4.2** 夜間パージの自動化（= Phase 19.3.2）— `Done`（`lib/retention.ts:purgeOldestDetailDay()` を新規作成し `dune-kickoff` から毎晩 1 日ぶん削除。集計行が無い日は消さない。失敗しても kickoff 自体は成功扱い。`scripts/purge-gauntlet-detail.ts --nightly` で**本番と同じ経路**を手元から実行でき、実際に 2026-06-15 / 6,560 行の削除で動作確認済み）
 - [x] **21.4.3** price 由来の UPDATE churn を抑制 — `Done`（`lib/ingest.ts`: `PRICE_UPDATE_EPSILON = 1e-6`。相対差がこれ以下なら書き直さない。$51M の TVL に対して $51 相当で、日次の値動き 1.5e-4 の 1% 未満。`usd_value` の食い違いは同じ許容差で拾い直す条件を残した）
 - [ ] **21.4.4** 実ファイルの回収（任意）— `Pending`（現在 471 MB / 512 MB のままで、内部に約 180 MB の空きページがある状態。日々の書き込みは空きページを再利用するので支障は無いが、**ファイル拡張を伴う操作（VACUUM の FSM 拡張など）は依然として失敗しうる**。実サイズを減らすなら PK インデックスの DROP → 再作成で約 85 MB 回収できる（157 MB の索引が 65 万行なら約 70 MB になる）。DROP が先なのでピーク時も容量内に収まる）
