@@ -562,3 +562,45 @@
 - 本番 API 実測（デプロイ済みの集計テーブル経由）: 09-09 .. 09-12 の 4 日とも `usdky` / `gauntlet` 両方が埋まり null なし
 - 残るのは 09-13（当日）のみ = 今夜の cron 待ち
 - **Phase 19.3.1 のパージがデプロイ完了により実行可能になった**（未実行）
+
+
+---
+
+## Phase 21: 2026-09-13 の Gauntlet が表示されない（Neon 容量上限の再来）
+
+> 現象: 09-13 の Gauntlet が画面に出ない。
+> 結論: **Neon がまた 490 MB / 512 MB に達して書き込めず、09-13 の取り込みが 1,232 行で止まった**。
+> Phase 19 で用意した明細パージ（19.3.1）を**まだ実行していない**ため、増加が止まっていなかった。
+
+### 21.1 現状把握
+- [x] **21.1** 原因の切り分け — `Done`
+  - `gauntlet_snapshots` の 09-13 は **1,232 行 / share_price = 1**（正常日は約 7,800 行）= 部分取り込み
+  - `gauntlet_share_prices` の 09-13 も欠損 → だから share_price が 1.0 にフォールバックしていた
+  - `dune_jobs` #264 / #265 / #266 が **11 時間以上 `executing` のまま**。ingest が容量エラーで throw → catch されて `poll_error` になり job は executing のまま残る。stale UPDATE はループの後ろに移したが、その手前で関数が 60 秒に達すると到達しない
+  - → poll 窓（23-02 時台）の間、10 分おきに 6 万行を取得しては失敗するループになっていた（Dune の results 取得を無駄に繰り返す）
+  - DB は **490 MB / 512 MB**。VACUUM しても縮まない（dead tuple は既に回収済みで、ファイル自体が実データで埋まっている）
+  - USDKY 側は 09-13 まで正常（1 日 615 行と軽いので通った）
+
+### 21.2 容量が想定より早く埋まった理由
+- `gauntlet_snapshots` の heap が 196 MB → **222 MB** に増えた。新規行は 9,000 行（約 1.4 MB）しかないので、残りは **UPDATE による行の書き直し**
+- 犯人は `ingestGauntletPrices()` の UPDATE。毎晩 8 日ぶんの window（約 6 万行）に対して `share_price` / `usd_value` を突合し直すが、**Dune 側が過去日の share_price を微修正してくる**ため（09-11 が 1.0823679467464535 → 1.0823680975739043 に変わった実例あり）、毎晩数万行が書き直されて dead tuple になる
+- → 対策候補: price 由来の UPDATE を「直近 N 日」または「差が閾値を超える場合」に限定する
+
+### 21.3 復旧
+- [x] **21.3.1** `--only-dates` の追加 — `Done` (`scripts/backfill-gauntlet-range.ts`。完了済み execution から**欠損日だけ**を書き戻せるようにした。既に入っている日を上書きすると dead tuple が増えて容量を無駄に食うため。あわせて `scripts/diag-gauntlet-gap.ts` が `execution_id` を出すようにした)
+- [x] **21.3.2** 09-13 の share_price を復旧 — `Done`（#265 の execution `01M2EHPWHTMYGXMYHN4Z93JSWP` から 1 行だけ ingest。追加クレジットなし）
+- [x] **21.3.3** 09-13 の明細を復旧 — `Done`（パージで空きを作ってから #264 の execution `01M2EHPW7K72KMT0ZD9992E4VH` から **7,805 行**を `--only-dates 2026-09-13` で取り込み。追加クレジットなし。あわせて #266 の execution から kast_base_wallets 6,008 件も更新）
+- [x] **21.3.4** 滞留している `executing` job の後始末 — `Done`（`scripts/fix-stuck-dune-jobs.ts` を新規作成。3 時間以上 `executing` の job を一覧し `--yes` で failed に落とす。#264/#265/#266 を処理済み。execution_id は残るので後から `--execution-id` で再取り込みできる）
+
+### 21.4 恒久対策
+- [x] **21.4.1** 明細パージの実行（保持 90 日）— `Done`（ユーザー判断で 90 日。**1,466,549 行 → 651,307 行 / 91 日**。途中 1 回目は VACUUM の FSM 拡張が容量上限で弾かれて 180 日目で停止したため、`migrations/008_reclaim_space.sql` で `idx_gauntlet_holder` (17 MB) と `idx_snapshots_date` (2 MB) を削除して 490 → 470 MB にしてから再開した。**インデックスの DROP はファイルを消すので pg_database_size が即減る。DELETE / VACUUM では減らない**のがポイント）
+- [x] **21.4.2** 夜間パージの自動化（= Phase 19.3.2）— `Done`（`lib/retention.ts:purgeOldestDetailDay()` を新規作成し `dune-kickoff` から毎晩 1 日ぶん削除。集計行が無い日は消さない。失敗しても kickoff 自体は成功扱い。`scripts/purge-gauntlet-detail.ts --nightly` で**本番と同じ経路**を手元から実行でき、実際に 2026-06-15 / 6,560 行の削除で動作確認済み）
+- [x] **21.4.3** price 由来の UPDATE churn を抑制 — `Done`（`lib/ingest.ts`: `PRICE_UPDATE_EPSILON = 1e-6`。相対差がこれ以下なら書き直さない。$51M の TVL に対して $51 相当で、日次の値動き 1.5e-4 の 1% 未満。`usd_value` の食い違いは同じ許容差で拾い直す条件を残した）
+- [ ] **21.4.4** 実ファイルの回収（任意）— `Pending`（現在 471 MB / 512 MB のままで、内部に約 180 MB の空きページがある状態。日々の書き込みは空きページを再利用するので支障は無いが、**ファイル拡張を伴う操作（VACUUM の FSM 拡張など）は依然として失敗しうる**。実サイズを減らすなら PK インデックスの DROP → 再作成で約 85 MB 回収できる（157 MB の索引が 65 万行なら約 70 MB になる）。DROP が先なのでピーク時も容量内に収まる）
+
+
+### Phase 21 で分かった Neon の挙動（重要）
+- `pg_database_size`（= Neon の `max_cluster_size` が見る値）は**割り当て済みファイルの合計**。`DELETE` も `VACUUM` もファイルを縮めないので**この値は減らない**
+- 減るのは **`DROP INDEX` / `DROP TABLE` / `TRUNCATE`**（ファイルごと消える）。`VACUUM FULL` は新ファイルを作ってから旧を消すので**一時的に倍必要**＝上限到達時には使えない
+- 上限に張り付くと **`VACUUM` すら失敗する**（FSM の拡張が `throttle_or_fail_extension` で弾かれる）。この状態を抜けるには先に索引を落とすしかない
+- 逆に言えば、**内部に空きページさえあれば書き込みは通る**。パージの目的は「使用量を減らすこと」ではなく「拡張を必要としない状態を作ること」

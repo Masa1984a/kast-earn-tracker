@@ -93,7 +93,7 @@ async function main() {
 
   console.log(`\n=== 4. dune_jobs (created_at ${FROM} 以降, 全件) ===`);
   const jobs = (await sql`
-    SELECT id, job_kind, status, query_id,
+    SELECT id, job_kind, status, query_id, execution_id,
            created_at, started_at, completed_at,
            rows_count, error_message, params
     FROM dune_jobs
@@ -105,7 +105,7 @@ async function main() {
     const created = j.created_at instanceof Date ? j.created_at.toISOString() : String(j.created_at);
     const done = j.completed_at instanceof Date ? j.completed_at.toISOString() : String(j.completed_at);
     console.log(
-      `  #${j.id} ${j.job_kind} q=${j.query_id} ${j.status} created=${created} completed=${done} rows=${j.rows_count ?? '-'} err=${j.error_message ?? '-'} params=${JSON.stringify(j.params)}`,
+      `  #${j.id} ${j.job_kind} q=${j.query_id} ${j.status} exec=${j.execution_id ?? '-'} created=${created} completed=${done} rows=${j.rows_count ?? '-'} err=${j.error_message ?? '-'} params=${JSON.stringify(j.params)}`,
     );
   }
 

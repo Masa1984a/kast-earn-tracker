@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb, type NeonClient } from '@/lib/db';
+import { DETAIL_RETENTION_DAYS, purgeOldestDetailDay } from '@/lib/retention';
 import {
   executeQuery,
   GAUNTLET_PRICE_QUERY_ID,
@@ -24,6 +25,7 @@ const MAX_LOOKBACK_DAYS = 30;
  * 長い欠損は「1 晩 9 日ぶんずつ」複数晩かけて自己修復させる。
  */
 const MAX_WINDOW_DAYS = 8;
+
 
 type GapInfo = {
   earliest_missing: string | null;
@@ -192,6 +194,14 @@ export async function GET(req: NextRequest) {
     }),
   ]);
 
+  // 保持期間より古い明細を 1 日ぶん間引く。失敗しても kickoff は成功扱いにする
+  let purged: { date: string | null; rows: number } | { error: string };
+  try {
+    purged = await purgeOldestDetailDay(sql);
+  } catch (err) {
+    purged = { error: err instanceof Error ? err.message : String(err) };
+  }
+
   return NextResponse.json({
     windows: {
       snapshots: { start_date: snapshotStart, end_date },
@@ -199,6 +209,8 @@ export async function GET(req: NextRequest) {
     },
     gaps: { snapshots: snapshotGap, price: priceGap },
     max_lookback_days: MAX_LOOKBACK_DAYS,
+    detail_retention_days: DETAIL_RETENTION_DAYS,
+    purged,
     jobs,
   });
 }

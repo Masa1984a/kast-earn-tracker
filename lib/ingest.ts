@@ -20,6 +20,11 @@ type KastWalletRow = {
 };
 
 const SNAPSHOT_BATCH = 500;
+/**
+ * share_price の差がこの相対値以下なら `gauntlet_snapshots` を書き直さない。
+ * 1e-6 は $51M の TVL に対して $51 相当で、日次の値動き (約 1.5e-4) の 1% 未満。
+ */
+const PRICE_UPDATE_EPSILON = 1e-6;
 
 export async function ingestJobResults(
   sql: NeonClient,
@@ -124,6 +129,9 @@ async function ingestGauntletPrices(
       daily_volume_usdc = excluded.daily_volume_usdc
   `;
 
+  // Dune は過去日の share_price を 1e-7 程度の桁で修正してくることがある。
+  // その差で 6 万行を書き直すと dead tuple だけが増えて Neon の容量を食うので
+  // （Phase 21.2）、相対差が PRICE_UPDATE_EPSILON を超える場合だけ更新する。
   await sql`
     UPDATE gauntlet_snapshots gs
     SET
@@ -132,8 +140,12 @@ async function ingestGauntletPrices(
     FROM gauntlet_share_prices gp
     WHERE gs.snapshot_date = gp.effective_date
       AND gs.snapshot_date = ANY(${dates}::date[])
-      AND (gs.share_price IS DISTINCT FROM gp.share_price
-           OR gs.usd_value IS DISTINCT FROM gs.shares * gp.share_price)
+      AND (
+        ABS(gs.share_price - gp.share_price) > gp.share_price * ${PRICE_UPDATE_EPSILON}::numeric
+        -- usd_value が share_price と食い違っている行は同じ許容差で拾い直す
+        OR ABS(gs.usd_value - gs.shares * gp.share_price)
+             > ABS(gs.shares * gp.share_price) * ${PRICE_UPDATE_EPSILON}::numeric
+      )
   `;
 
   // share_price の更新は usd_value を動かすので集計も追随させる

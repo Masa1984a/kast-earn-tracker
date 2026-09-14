@@ -11,9 +11,12 @@
  *
  *   npx tsx --env-file=.env.local scripts/purge-gauntlet-detail.ts --keep-days 90
  *   npx tsx --env-file=.env.local scripts/purge-gauntlet-detail.ts --keep-days 90 --yes
+ *   npx tsx --env-file=.env.local scripts/purge-gauntlet-detail.ts --nightly
+ *     → 日次 cron (dune-kickoff) と同じ lib/retention.ts の処理を 1 回だけ実行する
  */
 import { argv, exit } from 'node:process';
 import { getDb } from '../lib/db';
+import { DETAIL_RETENTION_DAYS, purgeOldestDetailDay } from '../lib/retention';
 
 /** 何日ぶん削除するごとに VACUUM するか */
 const VACUUM_EVERY = 30;
@@ -21,10 +24,12 @@ const VACUUM_EVERY = 30;
 function parseArgs() {
   let keepDays = 90;
   let yes = false;
+  let nightly = false;
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--keep-days') keepDays = Number(argv[++i]);
     else if (a === '--yes') yes = true;
+    else if (a === '--nightly') nightly = true;
     else if (a === '--dry-run') yes = false;
     else {
       console.error(`unknown argument: ${a}`);
@@ -35,12 +40,23 @@ function parseArgs() {
     console.error(`invalid --keep-days: ${keepDays} (7 以上の整数)`);
     exit(1);
   }
-  return { keepDays, yes };
+  return { keepDays, yes, nightly };
 }
 
 async function main() {
-  const { keepDays, yes } = parseArgs();
+  const { keepDays, yes, nightly } = parseArgs();
   const sql = getDb({ unpooled: true });
+
+  // 本番 cron と同じ経路（lib/retention.ts）を 1 回だけ実行する
+  if (nightly) {
+    const res = await purgeOldestDetailDay(sql, keepDays === 90 ? DETAIL_RETENTION_DAYS : keepDays);
+    console.log(
+      res.date
+        ? `nightly purge: ${res.date} を ${res.rows} 行削除`
+        : `nightly purge: 保持期間 ${keepDays} 日より古い明細は無い`,
+    );
+    return;
+  }
 
   const [anchor] = (await sql`
     SELECT MAX(snapshot_date)::text AS max_d,

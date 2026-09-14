@@ -10,6 +10,7 @@
  *   ... --kinds snapshots,price,kast_wallets   （既定は snapshots,price）
  *   ... --no-wait            kickoff だけして ingest は本番 dune-poll に任せる（従来動作）
  *   ... --execution-id <id>  kickoff せず既存 execution の results だけ取り込む（クレジット消費なし / kind は 1 つだけ指定）
+ *   ... --only-dates 2026-09-13  取得した results のうち、この日だけを ingest する
  *   ... --timeout-min 90     Dune の完了待ちタイムアウト（既定 60 分）
  *   ... --dry-run            Dune を叩かず対象期間の現状だけ表示
  */
@@ -57,6 +58,7 @@ function parseArgs() {
   let wait = true;
   let executionId: string | undefined;
   let timeoutMin = 60;
+  let onlyDates: string[] = [];
 
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
@@ -68,6 +70,7 @@ function parseArgs() {
     else if (a === '--no-wait') wait = false;
     else if (a === '--execution-id') executionId = argv[++i];
     else if (a === '--timeout-min') timeoutMin = Number(argv[++i]);
+    else if (a === '--only-dates') onlyDates = argv[++i].split(',').map((d) => d.trim());
     else {
       console.error(`unknown argument: ${a}`);
       exit(1);
@@ -103,7 +106,14 @@ function parseArgs() {
     exit(1);
   }
 
-  return { from, to, kinds, dryRun, wait, executionId, timeoutMin };
+  for (const d of onlyDates) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      console.error(`invalid --only-dates: ${d} (YYYY-MM-DD)`);
+      exit(1);
+    }
+  }
+
+  return { from, to, kinds, dryRun, wait, executionId, timeoutMin, onlyDates };
 }
 
 function paramsFor(kind: Kind, from?: string, to?: string): Record<string, string> {
@@ -156,11 +166,29 @@ async function waitForCompletion(executionId: string, timeoutMin: number): Promi
 }
 
 /** results を取得してローカルで ingest する。dune-poll には触らせない */
-async function fetchAndIngest(sql: NeonClient, kind: Kind, executionId: string): Promise<number> {
+async function fetchAndIngest(
+  sql: NeonClient,
+  kind: Kind,
+  executionId: string,
+  onlyDates: string[] = [],
+): Promise<number> {
   console.log('    results 取得中...');
-  const rows = await getAllExecutionResults(executionId, {
+  let rows = await getAllExecutionResults(executionId, {
     onPage: (fetched, total) => console.log(`      fetched [${fetched} / ${total ?? '?'}]`),
   });
+
+  // 必要な日だけ書き戻す。既に入っている日を上書きすると dead tuple が増えて
+  // Neon の容量を無駄に食うので、欠損日だけを対象にできるようにしている
+  if (onlyDates.length > 0) {
+    const want = new Set(onlyDates);
+    const dateField = kind === 'price' ? 'effective_date' : 'snapshot_date';
+    const before = rows.length;
+    rows = rows.filter((r) => {
+      const v = (r as Record<string, unknown>)[dateField];
+      return typeof v === 'string' && want.has(v.slice(0, 10));
+    });
+    console.log(`    --only-dates ${onlyDates.join(',')} で ${before} → ${rows.length} 行に絞り込み`);
+  }
   console.log(`    ${rows.length} 行を ingest 開始`);
 
   let inserted = 0;
@@ -174,7 +202,7 @@ async function fetchAndIngest(sql: NeonClient, kind: Kind, executionId: string):
 }
 
 async function main() {
-  const { from, to, kinds, dryRun, wait, executionId, timeoutMin } = parseArgs();
+  const { from, to, kinds, dryRun, wait, executionId, timeoutMin, onlyDates } = parseArgs();
   const sql = getDb({ unpooled: true });
 
   const windowLabel = from && to ? `${from} .. ${to}` : '(期間パラメータなし)';
@@ -222,7 +250,7 @@ async function main() {
 
     try {
       await waitForCompletion(execId, timeoutMin);
-      const inserted = await fetchAndIngest(sql, kind, execId);
+      const inserted = await fetchAndIngest(sql, kind, execId, onlyDates);
       await sql`
         UPDATE dune_jobs
         SET status = 'completed', completed_at = now(), rows_count = ${inserted}
