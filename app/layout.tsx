@@ -55,6 +55,13 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        <div
+          role="status"
+          className="bg-[#EBCB8B] px-4 py-2 text-center text-sm font-medium text-[#2E3440]"
+        >
+          Updates stopped on 2026-10-15. This dashboard is no longer updated;
+          the data shown is through 2026-10-15.
+        </div>
         {children}
         <SwRegister />
       </body>

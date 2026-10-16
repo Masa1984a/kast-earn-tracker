@@ -1,8 +1,8 @@
 # USDKY Tracker - Implementation Plan
 
-最終更新: 2026-09-05
+最終更新: 2026-10-16
 進行状況: 44 / 47 (Phase 1-8) + Phase 9: 34/36 + Phase 10: 26/27 + Phase 14: 5/5 done
-現在の焦点: **Phase 16**（Neon compute 100 CU-hour: 原因調査 = 完了 / 16.2.0 interval 緩和 = 完了・効果測定中 / 16.2.4 → 16.2.1 が次）、**Phase 15**（Gauntlet 欠損のリカバリ済 / 再発防止 3 件が残)
+現在の焦点: **Phase 22**（Dune プラン変更に伴う 2026-10-15 での更新停止）。それ以前: **Phase 16**（Neon compute 100 CU-hour: 原因調査 = 完了 / 16.2.0 interval 緩和 = 完了・効果測定中 / 16.2.4 → 16.2.1 が次）、**Phase 15**（Gauntlet 欠損のリカバリ済 / 再発防止 3 件が残)
 
 ---
 
@@ -604,3 +604,16 @@
 - 減るのは **`DROP INDEX` / `DROP TABLE` / `TRUNCATE`**（ファイルごと消える）。`VACUUM FULL` は新ファイルを作ってから旧を消すので**一時的に倍必要**＝上限到達時には使えない
 - 上限に張り付くと **`VACUUM` すら失敗する**（FSM の拡張が `throttle_or_fail_extension` で弾かれる）。この状態を抜けるには先に索引を落とすしかない
 - 逆に言えば、**内部に空きページさえあれば書き込みは通る**。パージの目的は「使用量を減らすこと」ではなく「拡張を必要としない状態を作ること」
+
+
+---
+
+## Phase 22: 2026-10-15 で更新を停止（Dune プラン変更で採算が合わなくなったため）
+
+> 方針: 日次 cron を全て止め、データは 2026-10-15 分までで固定する。画面上部に停止を知らせるバーを出す。
+> 事前確認（2026-10-16 09:19 UTC）: `usdky_snapshots` / `gauntlet_snapshots` とも 2026-10-15 まで揃っている。dune_jobs #364-#366 (10-15 23:30 UTC) は completed。10-16 分は未取得 = 今 cron を外せば 10-15 でちょうど止まる。
+
+- [x] **22.1** `vercel.json` から crons を全削除 — `Done` (`vercel.json` を `{ "crons": [] }` に。usdky-snapshot / dune-kickoff / dune-poll の 3 本を撤去)
+- [x] **22.2** 画面上部に停止告知バーを追加 — `Done` (`app/layout.tsx` の body 先頭に琥珀色の `role="status"` バー。全タブ共通で表示)
+- [x] **22.3** 型チェック・lint・build で確認 — `Done` (`tsc --noEmit` / `eslint app/layout.tsx` / `next build` すべて成功)
+- [ ] **22.4** コミット + デプロイ後に Vercel 側で cron が消えたことを確認 — `Pending` (**2026-10-16 23:00 UTC より前にデプロイが必要**。間に合わないと 10-16 分が書き込まれる。未コミット・未 push)
